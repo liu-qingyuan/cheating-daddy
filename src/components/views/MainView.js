@@ -694,6 +694,9 @@ export class MainView extends LocalizedElement {
         whisperDownloading: { type: Boolean },
         downloadProgress: { type: Object },
         onCancelDownload: { type: Function },
+        permissionState: { state: true },
+        permissionsBusy: { state: true },
+        permissionError: { state: true },
         // Internal state
         _mode: { state: true },
         _token: { state: true },
@@ -721,6 +724,10 @@ export class MainView extends LocalizedElement {
 
     constructor() {
         super();
+        this.permissionState = null;
+        this.permissionsBusy = false;
+        this.permissionError = '';
+        this._onPermissionFocus = () => this._checkPermissions();
         this.onStart = () => {};
         this.onExternalLink = () => {};
         this.selectedProfile = 'interview';
@@ -805,11 +812,14 @@ export class MainView extends LocalizedElement {
     connectedCallback() {
         super.connectedCallback();
         document.addEventListener('keydown', this.boundKeydownHandler);
+        window.addEventListener('focus', this._onPermissionFocus);
+        this._checkPermissions();
     }
 
     disconnectedCallback() {
         super.disconnectedCallback();
         document.removeEventListener('keydown', this.boundKeydownHandler);
+        window.removeEventListener('focus', this._onPermissionFocus);
         if (this._animId) cancelAnimationFrame(this._animId);
     }
 
@@ -1036,6 +1046,76 @@ export class MainView extends LocalizedElement {
         e.stopPropagation();
     }
 
+    async _checkPermissions() {
+        if (!cheatingDaddy.isMacOS || this.permissionsBusy) return;
+        this.permissionsBusy = true;
+        try {
+            this.permissionState = await window.require('electron').ipcRenderer.invoke('media-permissions');
+            this.permissionError = this.permissionState.error || '';
+        } catch (error) {
+            this.permissionState = null;
+            this.permissionError = '无法检查权限：' + error.message;
+        } finally {
+            this.permissionsBusy = false;
+        }
+    }
+
+    async _openPermissionSettings(type) {
+        try {
+            const ipc = window.require('electron').ipcRenderer;
+            if (type === 'microphone' && this.permissionState?.microphone === 'not-determined') {
+                await ipc.invoke('media-access-status', 'microphone', true);
+            } else {
+                const result = await ipc.invoke('open-media-settings', type);
+                if (!result.success) throw new Error(result.error);
+            }
+            await this._checkPermissions();
+        } catch (error) {
+            this.permissionError = error.message;
+        }
+    }
+
+    _renderPermissionCheck() {
+        if (!cheatingDaddy.isMacOS) return '';
+        const state = this.permissionState;
+        const labels = {
+            granted: '已允许',
+            denied: '未允许',
+            'not-determined': '尚未请求',
+            restricted: '受系统策略限制',
+            unknown: '未知',
+            'not-checked': '未检查',
+        };
+        return html`<section
+            id="permissionCheck"
+            style="padding:10px; border:1px solid var(--border); border-radius:8px; font-size:12px; color:var(--text-primary)"
+        >
+            <div style="display:flex; justify-content:space-between; align-items:center">
+                <strong>${this.t('权限检查')}</strong>
+                <button id="refreshPermissions" ?disabled=${this.permissionsBusy} @click=${this._checkPermissions}>
+                    ${this.t(this.permissionsBusy ? '检查中…' : '重新检查')}
+                </button>
+            </div>
+            ${['microphone', 'screen'].map(
+                type =>
+                    html`<div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:8px">
+                        <span id=${type + 'PermissionStatus'}
+                            >${this.t(type === 'microphone' ? '麦克风' : '屏幕录制')}：${this.t(state ? labels[state[type]] || '未知' : '未检查')}</span
+                        >
+                        <button
+                            id=${'open' + (type === 'microphone' ? 'Microphone' : 'Screen') + 'Settings'}
+                            @click=${() => this._openPermissionSettings(type)}
+                        >
+                            ${this.t(type === 'microphone' && state?.microphone === 'not-determined' ? '请求麦克风权限' : type === 'microphone' ? '打开麦克风设置' : '打开屏幕录制设置')}
+                        </button>
+                    </div>`
+            )}
+            ${state && state.screen !== 'granted' ? html`<p>${this.t(state?.screenRequired ? '当前系统声音模式需要屏幕录制权限，开启后才能开始。' : '截图未授权；仅语音或文件会话仍可使用。')}</p>` : ''}
+            <p>${this.t('授权后返回会自动复查；若仍未允许，请完全退出并重新打开应用。这里只检查权限，不代表录音和截图已经实测成功。')}</p>
+            ${this.permissionError ? html`<div role="alert">${this.permissionError}</div>` : ''}
+        </section>`;
+    }
+
     // ── Start ──
 
     _handleStart() {
@@ -1118,6 +1198,7 @@ export class MainView extends LocalizedElement {
         </svg>`;
 
         return html`
+            ${this._renderPermissionCheck()}
             <button
                 class="start-button ${this.isInitializing || isDownloading ? 'disabled' : ''}"
                 ?disabled=${this.isInitializing || isDownloading}
@@ -1361,6 +1442,7 @@ export class MainView extends LocalizedElement {
                     @change=${async e => {
                         this._subscriptionAudioMode = e.target.value;
                         await cheatingDaddy.storage.updatePreference('subscriptionAudioMode', e.target.value);
+                        await this._checkPermissions();
                     }}
                 >
                     <option value="files_only" .selected=${this._subscriptionAudioMode === 'files_only'}>

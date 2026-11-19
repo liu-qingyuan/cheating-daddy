@@ -646,77 +646,89 @@ export class CheatingDaddyApp extends LocalizedElement {
 
     async handleStart() {
         if (this._sessionInitializing) return;
-        const prefs = await cheatingDaddy.storage.getPreferences();
-        this._microphoneCapture = null;
-        const providerMode = prefs.providerMode === 'cloud' ? 'byok' : prefs.providerMode || 'byok';
-
-        if (providerMode === 'cloud') {
-            const creds = await cheatingDaddy.storage.getCredentials();
-            if (!creds.cloudToken || creds.cloudToken.trim() === '') {
-                const mainView = this.shadowRoot.querySelector('main-view');
-                if (mainView && mainView.triggerApiKeyError) {
-                    mainView.triggerApiKeyError();
-                }
-                return;
-            }
-
-            const success = await cheatingDaddy.initializeCloud(this.selectedProfile);
-            if (!success) {
-                const mainView = this.shadowRoot.querySelector('main-view');
-                if (mainView && mainView.triggerApiKeyError) {
-                    mainView.triggerApiKeyError();
-                }
-                return;
-            }
-        } else if (providerMode === 'local' || providerMode === 'subscription') {
-            const success = await cheatingDaddy.initializeLocal(this.selectedProfile);
-            if (!success) {
-                const mainView = this.shadowRoot.querySelector('main-view');
-                if (mainView && mainView.triggerApiKeyError) {
-                    mainView.triggerApiKeyError();
-                }
-                return;
-            }
-        } else {
-            const apiKey = await cheatingDaddy.storage.getApiKey();
-            if (!apiKey || apiKey === '') {
-                const mainView = this.shadowRoot.querySelector('main-view');
-                if (mainView && mainView.triggerApiKeyError) {
-                    mainView.triggerApiKeyError();
-                }
-                return;
-            }
-
-            await cheatingDaddy.initializeGemini(this.selectedProfile, this.selectedLanguage);
-        }
-
         this._sessionInitializing = true;
-        let captureStarted;
         try {
-            captureStarted = await cheatingDaddy.startCapture(this.selectedScreenshotInterval, this.selectedImageQuality);
+            const prefs = await cheatingDaddy.storage.getPreferences();
+            if (cheatingDaddy.isMacOS) {
+                const permissions = await window.require('electron').ipcRenderer.invoke('media-permissions');
+                if (!permissions.readyToStart) {
+                    this.currentView = 'main';
+                    this.setStatus('开始前请先开启当前输入模式必需的权限。');
+                    await this.updateComplete;
+                    const mainView = this.shadowRoot.querySelector('main-view');
+                    if (mainView) {
+                        mainView.permissionState = permissions;
+                        mainView.permissionError = '权限未就绪，请使用下方按钮开启后重新检查。';
+                    }
+                    return;
+                }
+            }
+            this._microphoneCapture = null;
+            const providerMode = prefs.providerMode === 'cloud' ? 'byok' : prefs.providerMode || 'byok';
+
+            if (providerMode === 'cloud') {
+                const creds = await cheatingDaddy.storage.getCredentials();
+                if (!creds.cloudToken || creds.cloudToken.trim() === '') {
+                    const mainView = this.shadowRoot.querySelector('main-view');
+                    if (mainView && mainView.triggerApiKeyError) {
+                        mainView.triggerApiKeyError();
+                    }
+                    return;
+                }
+
+                const success = await cheatingDaddy.initializeCloud(this.selectedProfile);
+                if (!success) {
+                    const mainView = this.shadowRoot.querySelector('main-view');
+                    if (mainView && mainView.triggerApiKeyError) {
+                        mainView.triggerApiKeyError();
+                    }
+                    return;
+                }
+            } else if (providerMode === 'local' || providerMode === 'subscription') {
+                const success = await cheatingDaddy.initializeLocal(this.selectedProfile);
+                if (!success) {
+                    const mainView = this.shadowRoot.querySelector('main-view');
+                    if (mainView && mainView.triggerApiKeyError) {
+                        mainView.triggerApiKeyError();
+                    }
+                    return;
+                }
+            } else {
+                const apiKey = await cheatingDaddy.storage.getApiKey();
+                if (!apiKey || apiKey === '') {
+                    const mainView = this.shadowRoot.querySelector('main-view');
+                    if (mainView && mainView.triggerApiKeyError) {
+                        mainView.triggerApiKeyError();
+                    }
+                    return;
+                }
+
+                await cheatingDaddy.initializeGemini(this.selectedProfile, this.selectedLanguage);
+            }
+
+            const captureStarted = await cheatingDaddy.startCapture(this.selectedScreenshotInterval, this.selectedImageQuality);
+            if (captureStarted === false) {
+                if (window.require) await window.require('electron').ipcRenderer.invoke('close-session');
+                return;
+            }
+            this.responses = [];
+            this._lastTranscript = '';
+            this._transcripts = [];
+            this._responseContexts = [];
+            this._pendingResponseContext = null;
+            this._followLatest = true;
+            this._audioLevels = {};
+            this._activeInputMode = providerMode === 'subscription' ? prefs.subscriptionAudioMode || 'files_only' : null;
+            this._answerLanguage = prefs.selectedLanguage || 'cmn-CN';
+            this._asrLanguage = prefs.asrLanguage || 'auto';
+            this.currentResponseIndex = -1;
+            this.startTime = Date.now();
+            this.sessionActive = true;
+            this.currentView = 'assistant';
+            this._startTimer();
         } finally {
             this._sessionInitializing = false;
         }
-        if (captureStarted === false) {
-            if (window.require) await window.require('electron').ipcRenderer.invoke('close-session');
-            return;
-        }
-        this.responses = [];
-        this._lastTranscript = '';
-        this._transcripts = [];
-        this._responseContexts = [];
-        this._pendingResponseContext = null;
-        this._followLatest = true;
-        this._audioLevels = {};
-        this._activeInputMode = providerMode === 'subscription' ? prefs.subscriptionAudioMode || 'files_only' : null;
-        this._answerLanguage = prefs.selectedLanguage || 'cmn-CN';
-        this._asrLanguage = prefs.asrLanguage || 'auto';
-        this._sessionInitializing = false;
-        this.currentResponseIndex = -1;
-        this.startTime = Date.now();
-        this.sessionActive = true;
-        this.currentView = 'assistant';
-        this._startTimer();
     }
 
     async handleCancelLocalDownload() {

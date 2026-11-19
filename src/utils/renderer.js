@@ -933,15 +933,16 @@ ipcRenderer.on('clear-sensitive-data', async () => {
 });
 
 // Handle shortcuts based on current view
-function handleShortcut(shortcutKey) {
+async function handleShortcut(shortcutKey) {
     const currentView = cheatingDaddy.getCurrentView();
 
     if (shortcutKey === 'ctrl+enter' || shortcutKey === 'cmd+enter') {
         if (currentView === 'main') {
-            cheatingDaddy.element().handleStart();
-        } else {
-            captureManualScreenshot();
+            return cheatingDaddy.element().handleStart();
         }
+        const view = cheatingDaddy.element().shadowRoot?.querySelector('assistant-view');
+        if (currentView === 'assistant' && view) return view.handleScreenAnswer();
+        cheatingDaddy.setStatus('请先开始会话，再截图解题。');
     }
 }
 

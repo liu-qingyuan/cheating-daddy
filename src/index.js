@@ -261,6 +261,15 @@ function setupStorageIpcHandlers() {
 }
 
 function setupGeneralIpcHandlers() {
+    require('./utils/media-permissions')({
+        ipcMain,
+        mainWindow,
+        storage,
+        shell,
+        systemPreferences: require('electron').systemPreferences,
+        platform: process.platform,
+        systemVersion: process.platform === 'darwin' ? process.getSystemVersion() : '',
+    });
     ipcMain.handle('media-access-status', async (event, type, request = false) => {
         if (event.sender !== mainWindow?.webContents || !['microphone', 'screen'].includes(type)) return { status: 'restricted' };
         const { systemPreferences } = require('electron');

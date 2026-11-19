@@ -234,8 +234,12 @@ test('numeric diagnostic snapshot accepts only this renderer and excludes audio 
             mainWindow: { webContents: sender },
             ipcMain: { handle: (name, fn) => handlers.set(name, fn), on() {} },
             storage: { getConfigDir: () => directory },
-            require: name => (name === 'electron' ? { systemPreferences: { getMediaAccessStatus: () => 'granted' } } : require(name)),
-            process,
+            require: name =>
+                name === 'electron'
+                    ? { systemPreferences: { getMediaAccessStatus: () => 'granted' } }
+                    : require('node:module').createRequire(path.join(__dirname, '../src/index.js'))(name),
+            shell: { openExternal: async () => {} },
+            process: Object.assign(Object.create(process), { getSystemVersion: () => '27.0.1' }),
             Date,
             Promise,
             Number,

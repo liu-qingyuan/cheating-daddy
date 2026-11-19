@@ -333,6 +333,7 @@ export class AssistantView extends LocalizedElement {
         onSendText: { type: Function },
         shouldAnimateResponse: { type: Boolean },
         isAnalyzing: { type: Boolean, state: true },
+        screenshotError: { state: true },
     };
 
     constructor() {
@@ -367,6 +368,7 @@ export class AssistantView extends LocalizedElement {
         this.selectedProfile = 'interview';
         this.onSendText = () => {};
         this.isAnalyzing = false;
+        this.screenshotError = '';
         this._animFrame = null;
     }
 
@@ -574,16 +576,29 @@ export class AssistantView extends LocalizedElement {
         }
     }
 
+    async openScreenPermissionSettings() {
+        try {
+            const result = await window.require('electron').ipcRenderer.invoke('open-media-settings', 'screen');
+            if (!result.success) throw new Error(result.error);
+        } catch (error) {
+            this.screenshotError = error.message;
+        }
+    }
+
     async handleScreenAnswer() {
         if (this.isAnalyzing) return;
         if (!window.captureManualScreenshot) return;
+        this.screenshotError = '';
         this.isAnalyzing = true;
-        this._responseCountWhenStarted = this.responses.length;
         try {
             const result = await window.captureManualScreenshot();
-            if (!result?.success) cheatingDaddy.setStatus(result?.error || this.t('截图失败，请重试。'));
+            if (!result?.success) {
+                this.screenshotError = result?.error || this.t('截图失败，请重试。');
+                cheatingDaddy.setStatus(this.screenshotError);
+            }
         } catch (error) {
-            cheatingDaddy.setStatus(this.t('截图失败：') + error.message);
+            this.screenshotError = this.t('截图失败：') + error.message;
+            cheatingDaddy.setStatus(this.screenshotError);
         } finally {
             this.isAnalyzing = false;
         }
@@ -755,12 +770,6 @@ export class AssistantView extends LocalizedElement {
                 this._startWaveformAnimation();
             } else {
                 this._stopWaveformAnimation();
-            }
-        }
-
-        if (changedProperties.has('responses') && this.isAnalyzing) {
-            if (this.responses.length > this._responseCountWhenStarted) {
-                this.isAnalyzing = false;
             }
         }
     }
@@ -971,11 +980,24 @@ export class AssistantView extends LocalizedElement {
                 <input id="questionFile" type="file" accept="image/png,image/jpeg,audio/wav,.wav" @change=${this.handleQuestionFile} hidden />
                 <span id="importStatus" role="status" style="font-size:12px"></span>
             </div>
+            ${
+                this.screenshotError
+                    ? html`<div id="screenshotError" role="alert" style="padding:8px 16px; color:var(--danger); overflow-wrap:anywhere">
+                          ${this.screenshotError}
+                          <button @click=${this.openScreenPermissionSettings}>${this.t('打开屏幕录制设置')}</button>
+                      </div>`
+                    : ''
+            }
             <div class="input-bar">
                 <div class="input-bar-inner">
                     <input type="text" id="textInput" placeholder=${this.t('Type a message...')} @keydown=${this.handleTextKeydown} />
                 </div>
-                <button class="analyze-btn ${this.isAnalyzing ? 'analyzing' : ''}" @click=${this.handleScreenAnswer}>
+                <button
+                    class="analyze-btn ${this.isAnalyzing ? 'analyzing' : ''}"
+                    ?disabled=${this.isAnalyzing}
+                    aria-busy=${String(this.isAnalyzing)}
+                    @click=${this.handleScreenAnswer}
+                >
                     <canvas class="analyze-canvas"></canvas>
                     <span class="analyze-btn-content">
                         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24">
