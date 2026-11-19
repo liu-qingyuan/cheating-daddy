@@ -77,7 +77,7 @@ stateDiagram-v2
 stateDiagram-v2
  [*] --> Idle
  Idle --> Loading: Verify paths and ChatGPT login
- Loading --> Ready: ASR health ready
+ Loading --> Ready: ASR and selected capture ready
  Loading --> Idle: Error or cancel
  Ready --> Answering: Text or screenshot
  Ready --> Transcribing: Audio
@@ -123,3 +123,7 @@ classDiagram
 ```
 
 Runtime dependencies: `/Applications/Voxt.app` remains installed, model directory selected in UI, Codex CLI signed in using ChatGPT. No automatic download or paid fallback. Models and scratch files under `work/` stay outside Git.
+
+## 实时麦克风启动修复
+
+订阅模式不在 Start Session 时申请屏幕共享；麦克风启动成功后才进入会话，拒绝权限会显示原始错误并结束模型会话。截图只在 Analyze Screen 时请求。文件模式明确显示未开启麦克风。讲话结束后需停顿约一秒，才提交本地 ASR；播放音频应选择系统声音，不能用文件模式期待自动收音。

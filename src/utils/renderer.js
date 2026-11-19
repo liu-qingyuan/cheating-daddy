@@ -175,7 +175,7 @@ async function initializeLocal(profile = 'interview') {
               )
             : await ipcRenderer.invoke('initialize-local', localLlmModel, whisperModel, profile, customPrompt);
     if (success) {
-        cheatingDaddy.setStatus('Local AI Live');
+        cheatingDaddy.setStatus(prefs.providerMode === 'subscription' ? '本地 ASR 已就绪，正在连接输入…' : 'Local AI Live');
         return true;
     } else {
         cheatingDaddy.setStatus('error');
@@ -222,7 +222,10 @@ async function startCapture(screenshotIntervalSeconds = 5, imageQuality = 'mediu
         preferencesCache.providerMode === 'subscription'
             ? preferencesCache.subscriptionAudioMode || 'files_only'
             : preferencesCache.audioMode || 'speaker_only';
-    if (audioMode === 'files_only') return;
+    if (audioMode === 'files_only') {
+        cheatingDaddy.setStatus('文件模式：未开启麦克风，请导入音频或截图。');
+        return true;
+    }
 
     try {
         if (isMacOS) {
@@ -235,15 +238,18 @@ async function startCapture(screenshotIntervalSeconds = 5, imageQuality = 'mediu
                 if (!audioResult.success) throw new Error('Failed to start macOS audio capture: ' + audioResult.error);
             }
 
-            // Get screen capture for screenshots
-            mediaStream = await navigator.mediaDevices.getDisplayMedia({
-                video: {
-                    frameRate: 1,
-                    width: { ideal: 1920 },
-                    height: { ideal: 1080 },
-                },
-                audio: false, // Don't use browser audio on macOS
-            });
+            // Subscription screenshots are requested on demand by Analyze Screen.
+            // Starting a microphone must not wait for unrelated screen-sharing permission.
+            if (preferencesCache.providerMode !== 'subscription') {
+                mediaStream = await navigator.mediaDevices.getDisplayMedia({
+                    video: {
+                        frameRate: 1,
+                        width: { ideal: 1920 },
+                        height: { ideal: 1080 },
+                    },
+                    audio: false,
+                });
+            }
 
             console.log('macOS screen capture started - audio handled by SystemAudioDump');
 
@@ -264,6 +270,7 @@ async function startCapture(screenshotIntervalSeconds = 5, imageQuality = 'mediu
                     setupLinuxMicProcessing(micStream);
                 } catch (micError) {
                     console.warn('Failed to get microphone access on macOS:', micError);
+                    if (preferencesCache.providerMode === 'subscription') throw micError;
                 }
             }
         } else if (isLinux) {
@@ -372,6 +379,15 @@ async function startCapture(screenshotIntervalSeconds = 5, imageQuality = 'mediu
             }
         }
 
+        if (preferencesCache.providerMode === 'subscription') {
+            cheatingDaddy.setStatus(
+                audioMode === 'mic_only' || audioMode === 'both'
+                    ? '麦克风已连接：请说一句话，说完停顿约 1 秒。'
+                    : '系统声音采集中：请播放测试音频，不是对着麦克风说话。'
+            );
+            return true;
+        }
+
         console.log('MediaStream obtained:', {
             hasVideo: mediaStream.getVideoTracks().length > 0,
             hasAudio: mediaStream.getAudioTracks().length > 0,
@@ -380,9 +396,12 @@ async function startCapture(screenshotIntervalSeconds = 5, imageQuality = 'mediu
 
         // Manual mode only - screenshots captured on demand via shortcut
         console.log('Manual mode enabled - screenshots will be captured on demand only');
+        return true;
     } catch (err) {
         console.error('Error starting capture:', err);
-        cheatingDaddy.setStatus('error');
+        stopCapture();
+        cheatingDaddy.setStatus('采集失败：' + err.name + ' ' + err.message);
+        return false;
     }
 }
 

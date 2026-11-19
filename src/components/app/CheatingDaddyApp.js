@@ -608,6 +608,7 @@ export class CheatingDaddyApp extends LitElement {
     // ── Session start ──
 
     async handleStart() {
+        if (this._sessionInitializing) return;
         const prefs = await cheatingDaddy.storage.getPreferences();
         const providerMode = prefs.providerMode === 'cloud' ? 'byok' : prefs.providerMode || 'byok';
 
@@ -651,7 +652,17 @@ export class CheatingDaddyApp extends LitElement {
             await cheatingDaddy.initializeGemini(this.selectedProfile, this.selectedLanguage);
         }
 
-        cheatingDaddy.startCapture(this.selectedScreenshotInterval, this.selectedImageQuality);
+        this._sessionInitializing = true;
+        let captureStarted;
+        try {
+            captureStarted = await cheatingDaddy.startCapture(this.selectedScreenshotInterval, this.selectedImageQuality);
+        } finally {
+            this._sessionInitializing = false;
+        }
+        if (captureStarted === false) {
+            if (window.require) await window.require('electron').ipcRenderer.invoke('close-session');
+            return;
+        }
         this.responses = [];
         this._lastTranscript = '';
         this._sessionInitializing = false;

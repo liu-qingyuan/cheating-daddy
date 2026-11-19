@@ -101,6 +101,8 @@ function processLocalAudio(pcm, source = 'system') {
     const voiced = Math.sqrt(energy / (pcm.length / 2 || 1)) > 0.008;
     const duration = pcm.length / 48;
     if (voiced || state.bytes) {
+        if (voiced && state.bytes === 0)
+            sendToRenderer('update-status', source === 'mic' ? '听到麦克风语音，请说完后停顿约 1 秒…' : '听到系统声音，等待停顿后识别…');
         state.chunks.push(pcm);
         state.bytes += pcm.length;
         if (voiced) {
