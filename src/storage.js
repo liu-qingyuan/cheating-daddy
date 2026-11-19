@@ -22,18 +22,22 @@ const DEFAULT_CREDENTIALS = {
 
 const DEFAULT_PREFERENCES = {
     customPrompt: '',
-    providerMode: 'byok',
+    providerMode: 'subscription',
     selectedProfile: 'interview',
     selectedLanguage: 'en-US',
     selectedScreenshotInterval: '5',
     selectedImageQuality: 'medium',
     advancedMode: false,
     audioMode: 'speaker_only',
+    subscriptionAudioMode: 'files_only',
     fontSize: 'medium',
     backgroundTransparency: 0.8,
     googleSearchEnabled: false,
     localLlmModel: 'unsloth/Qwen3.5-4B-GGUF:Q4_K_M',
     whisperModel: 'tiny.en',
+    voxtModelDirectory: path.join(os.homedir(), 'work/cheating-daddy/work/mlx-community_Qwen3-ASR-1.7B-6bit'),
+    voxtAsrExecutable: '/Applications/Voxt.app/Contents/Resources/OmniRuntime/bin/qwen3_asr_server',
+    codexExecutable: '',
 };
 
 const DEFAULT_KEYBINDS = null; // null means use system defaults

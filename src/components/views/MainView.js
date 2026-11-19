@@ -689,6 +689,7 @@ export class MainView extends LitElement {
         selectedProfile: { type: String },
         onProfileChange: { type: Function },
         isInitializing: { type: Boolean },
+        statusText: { type: String },
         whisperDownloading: { type: Boolean },
         downloadProgress: { type: Object },
         onCancelDownload: { type: Function },
@@ -709,6 +710,10 @@ export class MainView extends LitElement {
         _useCustomLocalLlmModel: { state: true },
         _whisperModel: { state: true },
         _showLocalHelp: { state: true },
+        _voxtModelDirectory: { state: true },
+        _voxtAsrExecutable: { state: true },
+        _codexExecutable: { state: true },
+        _subscriptionAudioMode: { state: true },
     };
 
     constructor() {
@@ -718,11 +723,16 @@ export class MainView extends LitElement {
         this.selectedProfile = 'interview';
         this.onProfileChange = () => {};
         this.isInitializing = false;
+        this.statusText = '';
         this.whisperDownloading = false;
         this.downloadProgress = { active: false, label: '', percentage: null };
         this.onCancelDownload = () => {};
 
-        this._mode = 'byok';
+        this._mode = 'subscription';
+        this._voxtModelDirectory = '';
+        this._voxtAsrExecutable = '';
+        this._codexExecutable = '';
+        this._subscriptionAudioMode = 'files_only';
         this._token = '';
         this._geminiKey = '';
         this._groqKey = '';
@@ -776,6 +786,10 @@ export class MainView extends LitElement {
             this._localLlmModel = prefs.localLlmModel || 'unsloth/Qwen3.5-4B-GGUF:Q4_K_M';
             this._useCustomLocalLlmModel = !LOCAL_LLM_PRESETS.some(preset => preset.value === this._localLlmModel);
             this._whisperModel = prefs.whisperModel || 'tiny.en';
+            this._voxtModelDirectory = prefs.voxtModelDirectory || '';
+            this._voxtAsrExecutable = prefs.voxtAsrExecutable || '';
+            this._codexExecutable = prefs.codexExecutable || '';
+            this._subscriptionAudioMode = prefs.subscriptionAudioMode || 'files_only';
 
             this.requestUpdate();
         } catch (e) {
@@ -1038,7 +1052,7 @@ export class MainView extends LitElement {
     }
 
     triggerApiKeyError() {
-        this._keyError = this._mode !== 'local';
+        this._keyError = this._mode === 'byok';
         this.requestUpdate();
         setTimeout(() => {
             this._tokenError = false;
@@ -1239,6 +1253,7 @@ export class MainView extends LitElement {
 
             <div class="mode-links">
                 <button class="mode-link" @click=${() => this._saveMode('local')}>Use local AI</button>
+                <button class="mode-link" @click=${() => this._saveMode('subscription')}>本地语音 + GPT 订阅</button>
             </div>
         `;
     }
@@ -1312,6 +1327,57 @@ export class MainView extends LitElement {
 
             <div class="mode-links">
                 <button class="mode-link" @click=${() => this._saveMode('byok')}>Use own API keys</button>
+                <button class="mode-link" @click=${() => this._saveMode('subscription')}>本地语音 + GPT 订阅</button>
+            </div>
+        `;
+    }
+
+    _renderSubscriptionMode() {
+        const field = (key, state, label) =>
+            html` <label class="form-group"
+                ><span class="form-label">${label}</span>
+                <input
+                    type="text"
+                    .value=${this[state]}
+                    @change=${async e => {
+                        this[state] = e.target.value.trim();
+                        await cheatingDaddy.storage.updatePreference(key, this[state]);
+                    }}
+                />
+            </label>`;
+        return html`
+            <div class="config-note">
+                中英文语音在本机 Qwen3-ASR 转写；文字和截图交给已登录的 Codex。使用 ChatGPT 订阅额度，不自动使用付费 API。原始音频不上传。
+            </div>
+            <label class="form-group"
+                ><span class="form-label">语音输入来源</span>
+                <select
+                    .value=${this._subscriptionAudioMode}
+                    @change=${async e => {
+                        this._subscriptionAudioMode = e.target.value;
+                        await cheatingDaddy.storage.updatePreference('subscriptionAudioMode', e.target.value);
+                    }}
+                >
+                    <option value="files_only">只导入音频与截图（不持续录音）</option>
+                    <option value="mic_only">麦克风（中英文自动识别）</option>
+                    <option value="speaker_only">系统声音</option>
+                    <option value="both">麦克风与系统声音</option>
+                </select>
+            </label>
+            <details class="config-section">
+                <summary class="config-summary">模型与运行时路径（高级）</summary>
+                <div class="config-content">
+                    ${field('voxtModelDirectory', '_voxtModelDirectory', '本地 Qwen3-ASR 模型文件夹')}
+                    ${field('voxtAsrExecutable', '_voxtAsrExecutable', 'VOXT ASR 运行时')}
+                    ${field('codexExecutable', '_codexExecutable', 'Codex 可执行文件（留空自动检测）')}
+                    <div class="form-hint">需保留 Voxt.app，并先在终端运行 codex login，通过 ChatGPT 登录。</div>
+                </div>
+            </details>
+            ${this._renderStartButton()}
+            <div role="status">${this.statusText}</div>
+            <div class="mode-links">
+                <button class="mode-link" @click=${() => this._saveMode('byok')}>API Key 模式</button>
+                <button class="mode-link" @click=${() => this._saveMode('local')}>全部本地模式</button>
             </div>
         `;
     }
@@ -1339,12 +1405,19 @@ export class MainView extends LitElement {
                                   <button class="help-btn" @click=${this._openLocalHelp} aria-label="Open Local AI help">${helpIcon}</button>
                               </div>
                           `
-                        : html` <div class="page-title">${html`Cheating Daddy <span class="mode-suffix">BYOK</span>`}</div> `
+                        : html`
+                              <div class="page-title">
+                                  Cheating Daddy <span class="mode-suffix">${this._mode === 'subscription' ? 'Local GPT' : 'BYOK'}</span>
+                              </div>
+                          `
                 }
-                <div class="page-subtitle">${this._mode === 'byok' ? 'Bring your own API keys' : 'Run models locally on your machine'}</div>
+                <div class="page-subtitle">
+                    ${this._mode === 'subscription' ? '本地中英文语音 · GPT 订阅解题' : this._mode === 'byok' ? 'Bring your own API keys' : 'Run models locally on your machine'}
+                </div>
 
                 <!-- Cloud mode render branch intentionally disabled. -->
-                ${this._mode === 'byok' ? this._renderByokMode() : ''} ${this._mode === 'local' ? this._renderLocalMode() : ''}
+                ${this._mode === 'subscription' ? this._renderSubscriptionMode() : ''} ${this._mode === 'byok' ? this._renderByokMode() : ''}
+                ${this._mode === 'local' ? this._renderLocalMode() : ''}
             </div>
             ${this._mode === 'local' && this._showLocalHelp ? this._renderLocalHelp(closeIcon) : ''}
         `;

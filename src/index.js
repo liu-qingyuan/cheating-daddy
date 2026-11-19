@@ -20,7 +20,7 @@ app.whenReady().then(async () => {
     storage.initializeStorage();
 
     // Trigger screen recording permission prompt on macOS if not already granted
-    if (process.platform === 'darwin') {
+    if (process.platform === 'darwin' && storage.getPreferences().providerMode !== 'subscription') {
         const { desktopCapturer } = require('electron');
         desktopCapturer.getSources({ types: ['screen'] }).catch(() => {});
     }
@@ -41,6 +41,7 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
     stopMacOSAudioCapture();
     require('./utils/localai').closeLocalSession();
+    require('./utils/subscription').closeLocalSession();
 });
 
 app.on('activate', () => {

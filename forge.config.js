@@ -4,8 +4,14 @@ const { FuseV1Options, FuseVersion } = require('@electron/fuses');
 module.exports = {
     packagerConfig: {
         asar: true,
+        appBundleId: 'com.liuqingyuan.cheating-daddy-local-gpt',
+        extendInfo: {
+            NSMicrophoneUsageDescription: 'Use local Qwen ASR to transcribe Chinese and English audio.',
+            NSAudioCaptureUsageDescription: 'Transcribe selected system audio locally.',
+        },
+        ignore: [/^\/work($|\/)/, /^\/tests($|\/)/, /^\/docs($|\/)/],
         extraResource: ['./src/assets/SystemAudioDump'],
-        name: 'Cheating Daddy',
+        name: 'Cheating Daddy Local GPT',
         icon: 'src/assets/logo',
         // use `security find-identity -v -p codesigning` to find your identity
         // for macos signing

@@ -388,6 +388,8 @@ export class CheatingDaddyApp extends LitElement {
         _updateAvailable: { state: true },
         _whisperDownloading: { state: true },
         _localAiDownloadProgress: { state: true },
+        _lastTranscript: { state: true },
+        _sessionInitializing: { state: true },
     };
 
     constructor() {
@@ -403,6 +405,8 @@ export class CheatingDaddyApp extends LitElement {
         this.selectedImageQuality = 'medium';
         this.layoutMode = 'normal';
         this.responses = [];
+        this._lastTranscript = '';
+        this._sessionInitializing = false;
         this.currentResponseIndex = -1;
         this._viewInstances = new Map();
         this._isClickThrough = false;
@@ -469,6 +473,12 @@ export class CheatingDaddyApp extends LitElement {
         if (window.require) {
             const { ipcRenderer } = window.require('electron');
             ipcRenderer.on('new-response', (_, response) => this.addNewResponse(response));
+            ipcRenderer.on('session-initializing', (_, value) => {
+                this._sessionInitializing = value;
+            });
+            ipcRenderer.on('subscription-transcript', (_, text) => {
+                this._lastTranscript = text;
+            });
             ipcRenderer.on('update-response', (_, response) => this.updateCurrentResponse(response));
             ipcRenderer.on('update-status', (_, status) => this.setStatus(status));
             ipcRenderer.on('click-through-toggled', (_, isEnabled) => {
@@ -491,6 +501,8 @@ export class CheatingDaddyApp extends LitElement {
             const { ipcRenderer } = window.require('electron');
             ipcRenderer.removeAllListeners('new-response');
             ipcRenderer.removeAllListeners('update-response');
+            ipcRenderer.removeAllListeners('subscription-transcript');
+            ipcRenderer.removeAllListeners('session-initializing');
             ipcRenderer.removeAllListeners('update-status');
             ipcRenderer.removeAllListeners('click-through-toggled');
             ipcRenderer.removeAllListeners('reconnect-failed');
@@ -617,7 +629,7 @@ export class CheatingDaddyApp extends LitElement {
                 }
                 return;
             }
-        } else if (providerMode === 'local') {
+        } else if (providerMode === 'local' || providerMode === 'subscription') {
             const success = await cheatingDaddy.initializeLocal(this.selectedProfile);
             if (!success) {
                 const mainView = this.shadowRoot.querySelector('main-view');
@@ -641,6 +653,8 @@ export class CheatingDaddyApp extends LitElement {
 
         cheatingDaddy.startCapture(this.selectedScreenshotInterval, this.selectedImageQuality);
         this.responses = [];
+        this._lastTranscript = '';
+        this._sessionInitializing = false;
         this.currentResponseIndex = -1;
         this.startTime = Date.now();
         this.sessionActive = true;
@@ -748,6 +762,8 @@ export class CheatingDaddyApp extends LitElement {
             case 'main':
                 return html`
                     <main-view
+                        .isInitializing=${this._sessionInitializing}
+                        .statusText=${this.statusText}
                         .selectedProfile=${this.selectedProfile}
                         .onProfileChange=${p => this.handleProfileChange(p)}
                         .onStart=${() => this.handleStart()}
@@ -794,6 +810,7 @@ export class CheatingDaddyApp extends LitElement {
             case 'assistant':
                 return html`
                     <assistant-view
+                        .transcript=${this._lastTranscript}
                         .responses=${this.responses}
                         .currentResponseIndex=${this.currentResponseIndex}
                         .selectedProfile=${this.selectedProfile}

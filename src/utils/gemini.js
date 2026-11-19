@@ -10,6 +10,7 @@ const { startTransportLog, logTransportEvent, closeTransportLog } = require('./t
 // Lazy-loaded to avoid circular dependency (localai.js imports from gemini.js)
 let _localai = null;
 function getLocalAi() {
+    if (currentProviderMode === 'subscription') return require('./subscription');
     if (!_localai) _localai = require('./localai');
     return _localai;
 }
@@ -921,7 +922,7 @@ async function startMacOSAudioCapture(geminiSessionRef) {
 
             if (currentProviderMode === 'cloud') {
                 sendCloudAudio(monoChunk);
-            } else if (currentProviderMode === 'local') {
+            } else if (currentProviderMode === 'local' || currentProviderMode === 'subscription') {
                 getLocalAi().processLocalAudio(monoChunk);
             } else {
                 const base64Data = monoChunk.toString('base64');
@@ -1082,6 +1083,20 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
         return false;
     });
 
+    ipcMain.handle('initialize-subscription', async (event, options, profile, customPrompt) => {
+        getLocalAi().closeLocalSession();
+        currentProviderMode = 'subscription';
+        const success = await getLocalAi().initializeLocalSession(options, null, profile, customPrompt);
+        if (!success) currentProviderMode = 'byok';
+        return success;
+    });
+
+    ipcMain.handle('subscription-transcribe-wav', async (event, data, ask = false) => {
+        if (currentProviderMode !== 'subscription') return { success: false, error: '请先启动订阅会话。' };
+        if (typeof data !== 'string' || data.length > 16 * 1024 * 1024) return { success: false, error: '音频为空或过大。' };
+        return getLocalAi().transcribeWav(Buffer.from(data, 'base64'), ask === true);
+    });
+
     ipcMain.handle('initialize-local', async (event, localLlmModel, whisperModel, profile, customPrompt) => {
         currentProviderMode = 'local';
         const success = await getLocalAi().initializeLocalSession(localLlmModel, whisperModel, profile, customPrompt);
@@ -1110,7 +1125,7 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
                 return { success: false, error: error.message };
             }
         }
-        if (currentProviderMode === 'local') {
+        if (currentProviderMode === 'local' || currentProviderMode === 'subscription') {
             try {
                 const pcmBuffer = Buffer.from(data, 'base64');
                 getLocalAi().processLocalAudio(pcmBuffer);
@@ -1145,10 +1160,10 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
                 return { success: false, error: error.message };
             }
         }
-        if (currentProviderMode === 'local') {
+        if (currentProviderMode === 'local' || currentProviderMode === 'subscription') {
             try {
                 const pcmBuffer = Buffer.from(data, 'base64');
-                getLocalAi().processLocalAudio(pcmBuffer);
+                getLocalAi().processLocalAudio(pcmBuffer, 'mic');
                 return { success: true };
             } catch (error) {
                 console.error('Error sending local mic audio:', error);
@@ -1192,7 +1207,7 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
                 return { success: true, model: 'cloud' };
             }
 
-            if (currentProviderMode === 'local') {
+            if (currentProviderMode === 'local' || currentProviderMode === 'subscription') {
                 const result = await getLocalAi().sendLocalImage(data, prompt);
                 return result;
             }
@@ -1221,7 +1236,7 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
             }
         }
 
-        if (currentProviderMode === 'local') {
+        if (currentProviderMode === 'local' || currentProviderMode === 'subscription') {
             try {
                 console.log('Sending text to local Llama:', text);
                 return await getLocalAi().sendLocalText(text.trim());
@@ -1287,7 +1302,7 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
                 return { success: true };
             }
 
-            if (currentProviderMode === 'local') {
+            if (currentProviderMode === 'local' || currentProviderMode === 'subscription') {
                 getLocalAi().closeLocalSession();
                 currentProviderMode = 'byok';
                 closeTransportLog();

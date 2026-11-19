@@ -6,6 +6,8 @@ let screenshotInterval = null;
 let audioContext = null;
 let audioProcessor = null;
 let micAudioProcessor = null;
+let microphoneStream = null;
+let microphoneAudioContext = null;
 let audioBuffer = [];
 const SAMPLE_RATE = 24000;
 const AUDIO_CHUNK_DURATION = 0.1; // seconds
@@ -159,7 +161,19 @@ async function initializeLocal(profile = 'interview') {
     const whisperModel = prefs.whisperModel || 'tiny.en';
     const customPrompt = prefs.customPrompt || '';
 
-    const success = await ipcRenderer.invoke('initialize-local', localLlmModel, whisperModel, profile, customPrompt);
+    const success =
+        prefs.providerMode === 'subscription'
+            ? await ipcRenderer.invoke(
+                  'initialize-subscription',
+                  {
+                      modelDirectory: prefs.voxtModelDirectory,
+                      asrExecutable: prefs.voxtAsrExecutable,
+                      codexExecutable: prefs.codexExecutable || undefined,
+                  },
+                  profile,
+                  customPrompt
+              )
+            : await ipcRenderer.invoke('initialize-local', localLlmModel, whisperModel, profile, customPrompt);
     if (success) {
         cheatingDaddy.setStatus('Local AI Live');
         return true;
@@ -204,7 +218,11 @@ async function startCapture(screenshotIntervalSeconds = 5, imageQuality = 'mediu
 
     // Refresh preferences cache
     await loadPreferencesCache();
-    const audioMode = preferencesCache.audioMode || 'speaker_only';
+    const audioMode =
+        preferencesCache.providerMode === 'subscription'
+            ? preferencesCache.subscriptionAudioMode || 'files_only'
+            : preferencesCache.audioMode || 'speaker_only';
+    if (audioMode === 'files_only') return;
 
     try {
         if (isMacOS) {
@@ -212,9 +230,9 @@ async function startCapture(screenshotIntervalSeconds = 5, imageQuality = 'mediu
             console.log('Starting macOS capture with SystemAudioDump...');
 
             // Start macOS audio capture
-            const audioResult = await ipcRenderer.invoke('start-macos-audio');
-            if (!audioResult.success) {
-                throw new Error('Failed to start macOS audio capture: ' + audioResult.error);
+            if (audioMode !== 'mic_only') {
+                const audioResult = await ipcRenderer.invoke('start-macos-audio');
+                if (!audioResult.success) throw new Error('Failed to start macOS audio capture: ' + audioResult.error);
             }
 
             // Get screen capture for screenshots
@@ -369,8 +387,10 @@ async function startCapture(screenshotIntervalSeconds = 5, imageQuality = 'mediu
 }
 
 function setupLinuxMicProcessing(micStream) {
+    microphoneStream = micStream;
     // Setup microphone audio processing for Linux
     const micAudioContext = new AudioContext({ sampleRate: SAMPLE_RATE });
+    microphoneAudioContext = micAudioContext;
     const micSource = micAudioContext.createMediaStreamSource(micStream);
     const micProcessor = micAudioContext.createScriptProcessor(BUFFER_SIZE, 1, 1);
 
@@ -563,8 +583,12 @@ async function captureManualScreenshot(imageQuality = null) {
     const quality = imageQuality || currentImageQuality;
 
     if (!mediaStream) {
-        console.error('No media stream available');
-        return;
+        try {
+            mediaStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+        } catch (error) {
+            cheatingDaddy.setStatus('截图权限未授予：' + error.message);
+            return;
+        }
     }
 
     // Lazy init of video element
@@ -665,6 +689,10 @@ async function captureManualScreenshot(imageQuality = null) {
 window.captureManualScreenshot = captureManualScreenshot;
 
 function stopCapture() {
+    microphoneStream?.getTracks().forEach(track => track.stop());
+    microphoneStream = null;
+    microphoneAudioContext?.close().catch(() => {});
+    microphoneAudioContext = null;
     if (screenshotInterval) {
         clearInterval(screenshotInterval);
         screenshotInterval = null;
