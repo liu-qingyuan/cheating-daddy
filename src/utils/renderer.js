@@ -388,11 +388,26 @@ async function setupLinuxMicProcessing(micStream) {
     const generation = ++microphoneCaptureGeneration;
     const track = micStream.getAudioTracks()[0];
     const deviceLabel = track?.label || '未知麦克风';
-    const emit = detail => window.dispatchEvent(new CustomEvent('microphone-capture-state', { detail: { deviceLabel, ...detail } }));
+    let lastDiagnosticAt = 0;
+    const emit = detail => {
+        const settings = track?.getSettings?.() || {};
+        const payload = {
+            deviceLabel,
+            muted: track?.muted === true,
+            processing: settings.echoCancellation || settings.noiseSuppression || settings.autoGainControl ? 'communications' : 'raw',
+            ...detail,
+        };
+        window.dispatchEvent(new CustomEvent('microphone-capture-state', { detail: payload }));
+        const now = Date.now();
+        if (detail.state !== 'running' || now - lastDiagnosticAt >= 1000) {
+            lastDiagnosticAt = now;
+            void ipcRenderer.invoke('microphone-diagnostics', payload).catch(error => console.warn('Microphone diagnostics:', error.message));
+        }
+    };
     // Like VOXT's capture-start watchdog: permission is not proof of receiving PCM.
     for (let attempt = 0; attempt < 2; attempt++) {
         if (generation !== microphoneCaptureGeneration) throw new Error('麦克风启动已取消。');
-        emit({ state: 'starting', frames: 0, rms: 0 });
+        emit({ state: 'starting', frames: 0, rms: 0, peakRms: 0, samples: 0 });
         const context = new AudioContext({ sampleRate: SAMPLE_RATE });
         microphoneAudioContext = context;
         const source = context.createMediaStreamSource(micStream);
@@ -401,6 +416,8 @@ async function setupLinuxMicProcessing(micStream) {
         micAudioProcessor = processor;
         let audioBuffer = [];
         let frames = 0;
+        let samples = 0;
+        let peakRms = 0;
         let lastFrameAt = 0;
         let lastLevelAt = 0;
         let resolveFirstFrame;
@@ -418,11 +435,14 @@ async function setupLinuxMicProcessing(micStream) {
                 clearTimeout(timer);
                 resolveFirstFrame();
             }
-            // The meter observes raw capture and must not depend on ASR/GPT readiness.
+            // Keep numeric capture evidence independent of ASR, DSP and the meter's visual rounding.
+            let energy = 0;
+            for (const sample of inputData) energy += sample * sample;
+            const rms = Math.sqrt(energy / (inputData.length || 1));
+            samples += inputData.length;
+            peakRms = Math.max(peakRms, rms);
             if (lastFrameAt - lastLevelAt >= 250) {
-                let energy = 0;
-                for (const sample of inputData) energy += sample * sample;
-                emit({ state: 'running', contextState: context.state, frames, rms: Math.sqrt(energy / (inputData.length || 1)) });
+                emit({ state: 'running', contextState: context.state, frames, samples, rms, peakRms });
                 lastLevelAt = lastFrameAt;
             }
             audioBuffer.push(...inputData);
@@ -469,17 +489,29 @@ async function setupLinuxMicProcessing(micStream) {
 
 function requestMicrophone() {
     const deviceId = preferencesCache.microphoneDeviceId;
-    return navigator.mediaDevices.getUserMedia({
-        audio: {
-            ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
-            sampleRate: SAMPLE_RATE,
-            channelCount: 1,
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-        },
-        video: false,
-    });
+    const communications = preferencesCache.providerMode !== 'subscription' || preferencesCache.microphoneProcessing !== 'raw';
+    const acquire = () =>
+        navigator.mediaDevices.getUserMedia({
+            audio: {
+                ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+                sampleRate: SAMPLE_RATE,
+                channelCount: 1,
+                echoCancellation: communications,
+                noiseSuppression: communications,
+                autoGainControl: communications,
+            },
+            video: false,
+        });
+    if (typeof isMacOS !== 'undefined' && isMacOS) {
+        return ipcRenderer.invoke('media-access-status', 'microphone', true).then(result => {
+            if (result.status !== 'granted')
+                throw new Error(
+                    'macOS 未授权本应用的麦克风。请在系统设置 → 隐私与安全性 → 麦克风中允许 Cheating Daddy Local GPT，然后重新打开应用。'
+                );
+            return acquire();
+        });
+    }
+    return acquire();
 }
 
 function stopMicrophoneCapture() {
@@ -498,6 +530,7 @@ function stopMicrophoneCapture() {
     microphoneStream?.getTracks().forEach(track => track.stop());
     microphoneStream = null;
     window.dispatchEvent(new CustomEvent('microphone-capture-state', { detail: { state: 'stopped', rms: 0 } }));
+    void ipcRenderer.invoke('microphone-diagnostics', { state: 'stopped', rms: 0 }).catch(() => {});
 }
 
 async function reconnectMicrophone() {
@@ -684,110 +717,113 @@ If its a question about the website, give me the answer no bs, complete answer.
 If its a mcq question, give me the answer no bs, complete answer.`;
 
 async function captureManualScreenshot(imageQuality = null) {
-    console.log('Manual screenshot triggered');
-    const quality = imageQuality || currentImageQuality;
-
-    if (!mediaStream) {
-        try {
-            mediaStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
-        } catch (error) {
-            cheatingDaddy.setStatus('截图权限未授予：' + error.message);
-            return;
+    try {
+        if (isMacOS) {
+            const access = await ipcRenderer.invoke('media-access-status', 'screen', false);
+            if (access.status === 'denied' || access.status === 'restricted')
+                throw new Error('请在系统设置 → 隐私与安全性 → 屏幕与系统音频录制中允许 Cheating Daddy Local GPT，然后重新打开应用。');
         }
-    }
-
-    // Lazy init of video element
-    if (!hiddenVideo) {
-        hiddenVideo = document.createElement('video');
-        hiddenVideo.srcObject = mediaStream;
-        hiddenVideo.muted = true;
-        hiddenVideo.playsInline = true;
-        await hiddenVideo.play();
-
-        await new Promise(resolve => {
-            if (hiddenVideo.readyState >= 2) return resolve();
-            hiddenVideo.onloadedmetadata = () => resolve();
-        });
-
-        // Lazy init of canvas based on video dimensions
-        offscreenCanvas = document.createElement('canvas');
-        offscreenCanvas.width = hiddenVideo.videoWidth;
-        offscreenCanvas.height = hiddenVideo.videoHeight;
-        offscreenContext = offscreenCanvas.getContext('2d');
-    }
-
-    // Check if video is ready
-    if (hiddenVideo.readyState < 2) {
-        console.warn('Video not ready yet, skipping screenshot');
-        return;
-    }
-
-    // Downscale to max 1280px wide for faster transfer — vision models don't need 4K
-    const MAX_WIDTH = 1280;
-    const srcW = hiddenVideo.videoWidth;
-    const srcH = hiddenVideo.videoHeight;
-    let destW = srcW;
-    let destH = srcH;
-    if (srcW > MAX_WIDTH) {
-        destW = MAX_WIDTH;
-        destH = Math.round(srcH * (MAX_WIDTH / srcW));
-    }
-    offscreenCanvas.width = destW;
-    offscreenCanvas.height = destH;
-    offscreenContext.drawImage(hiddenVideo, 0, 0, destW, destH);
-
-    let qualityValue;
-    switch (quality) {
-        case 'high':
-            qualityValue = 0.85;
-            break;
-        case 'medium':
-            qualityValue = 0.6;
-            break;
-        case 'low':
-            qualityValue = 0.4;
-            break;
-        default:
-            qualityValue = 0.6;
-    }
-
-    offscreenCanvas.toBlob(
-        async blob => {
-            if (!blob) {
-                console.error('Failed to create blob from canvas');
-                return;
+        if (!mediaStream || mediaStream.getVideoTracks()[0]?.readyState !== 'live') {
+            mediaStream?.getTracks().forEach(track => track.stop());
+            mediaStream = await new Promise((resolve, reject) => {
+                let expired = false;
+                const timer = setTimeout(() => {
+                    expired = true;
+                    reject(new Error('屏幕选择超时，请重新点击截图并完成系统屏幕选择。'));
+                }, 30000);
+                navigator.mediaDevices.getDisplayMedia({ video: true, audio: false }).then(
+                    stream => {
+                        clearTimeout(timer);
+                        if (expired) {
+                            stream.getTracks().forEach(track => track.stop());
+                            return;
+                        }
+                        resolve(stream);
+                    },
+                    error => {
+                        clearTimeout(timer);
+                        reject(error);
+                    }
+                );
+            });
+            hiddenVideo = null;
+        }
+        if (!hiddenVideo) {
+            hiddenVideo = document.createElement('video');
+            hiddenVideo.srcObject = mediaStream;
+            hiddenVideo.muted = true;
+            hiddenVideo.playsInline = true;
+            let playTimer;
+            try {
+                await Promise.race([
+                    hiddenVideo.play(),
+                    new Promise((resolve, reject) => {
+                        playTimer = setTimeout(() => reject(new Error('屏幕视频播放超时。')), 5000);
+                    }),
+                ]);
+            } finally {
+                clearTimeout(playTimer);
             }
-
+        }
+        if (hiddenVideo.readyState < 2 || !hiddenVideo.videoWidth) {
+            await new Promise((resolve, reject) => {
+                const timer = setTimeout(() => {
+                    cleanup();
+                    reject(new Error('屏幕视频未就绪，请重试或重新选择屏幕。'));
+                }, 5000);
+                const loaded = () => {
+                    if (hiddenVideo.readyState >= 2 && hiddenVideo.videoWidth) {
+                        cleanup();
+                        resolve();
+                    }
+                };
+                const failed = () => {
+                    cleanup();
+                    reject(new Error('屏幕视频读取失败。'));
+                };
+                const cleanup = () => {
+                    clearTimeout(timer);
+                    hiddenVideo.removeEventListener('loadeddata', loaded);
+                    hiddenVideo.removeEventListener('error', failed);
+                };
+                hiddenVideo.addEventListener('loadeddata', loaded);
+                hiddenVideo.addEventListener('error', failed);
+                loaded();
+            });
+        }
+        if (!hiddenVideo.videoWidth || !hiddenVideo.videoHeight) throw new Error('截图尺寸无效。');
+        const maxWidth = 1280;
+        const width = Math.min(maxWidth, hiddenVideo.videoWidth);
+        const height = Math.round((hiddenVideo.videoHeight * width) / hiddenVideo.videoWidth);
+        offscreenCanvas = document.createElement('canvas');
+        offscreenCanvas.width = width;
+        offscreenCanvas.height = height;
+        offscreenContext = offscreenCanvas.getContext('2d');
+        offscreenContext.drawImage(hiddenVideo, 0, 0, width, height);
+        const quality = { high: 0.85, medium: 0.6, low: 0.4 }[imageQuality || currentImageQuality] || 0.6;
+        const blob = await new Promise(resolve => offscreenCanvas.toBlob(resolve, 'image/jpeg', quality));
+        if (!blob) throw new Error('截图图像生成失败。');
+        const data = await new Promise((resolve, reject) => {
             const reader = new FileReader();
-            reader.onloadend = async () => {
-                const base64data = reader.result.split(',')[1];
-
-                if (!base64data || base64data.length < 100) {
-                    console.error('Invalid base64 data generated');
-                    return;
-                }
-
-                console.log(`Sending image: ${destW}x${destH}, ~${Math.round(base64data.length / 1024)}KB`);
-
-                // Send image with prompt to HTTP API (response streams via IPC events)
-                const result = await ipcRenderer.invoke('send-image-content', {
-                    data: base64data,
-                    prompt: MANUAL_SCREENSHOT_PROMPT,
-                });
-
-                if (result.success) {
-                    console.log(`Image response completed from ${result.model}`);
-                    // Response already displayed via streaming events (new-response/update-response)
-                } else {
-                    console.error('Failed to get image response:', result.error);
-                    cheatingDaddy.addNewResponse(`Error: ${result.error}`);
-                }
-            };
+            reader.onload = () => resolve(reader.result.split(',')[1]);
+            reader.onerror = () => reject(new Error('截图文件读取失败。'));
             reader.readAsDataURL(blob);
-        },
-        'image/jpeg',
-        qualityValue
-    );
+        });
+        if (typeof data !== 'string' || data.length < 100) throw new Error('截图数据无效。');
+        cheatingDaddy.setStatus('截图已取得，正在识别题目…');
+        const result = await ipcRenderer.invoke('send-image-content', { data, prompt: MANUAL_SCREENSHOT_PROMPT });
+        if (!result?.success) throw new Error(result?.error || '截图解题失败。');
+        return result;
+    } catch (error) {
+        if (preferencesCache.providerMode === 'subscription') {
+            mediaStream?.getTracks().forEach(track => track.stop());
+            mediaStream = null;
+            hiddenVideo = null;
+        }
+        const message = '截图失败：' + error.message;
+        cheatingDaddy.setStatus(message);
+        return { success: false, error: message };
+    }
 }
 
 // Expose functions to global scope for external access

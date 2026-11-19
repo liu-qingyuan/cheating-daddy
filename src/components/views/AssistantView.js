@@ -499,10 +499,16 @@ export class AssistantView extends LocalizedElement {
 
     async handleScreenAnswer() {
         if (this.isAnalyzing) return;
-        if (window.captureManualScreenshot) {
-            this.isAnalyzing = true;
-            this._responseCountWhenStarted = this.responses.length;
-            window.captureManualScreenshot();
+        if (!window.captureManualScreenshot) return;
+        this.isAnalyzing = true;
+        this._responseCountWhenStarted = this.responses.length;
+        try {
+            const result = await window.captureManualScreenshot();
+            if (!result?.success) cheatingDaddy.setStatus(result?.error || this.t('截图失败，请重试。'));
+        } catch (error) {
+            cheatingDaddy.setStatus(this.t('截图失败：') + error.message);
+        } finally {
+            this.isAnalyzing = false;
         }
     }
 
@@ -771,6 +777,17 @@ export class AssistantView extends LocalizedElement {
                               ${this.t('实际麦克风')}：${this.microphoneCapture?.deviceLabel || this.t('等待采集')} ·
                               ${this.t({ starting: '等待音频回调', running: '正在接收音频', stalled: '音频采集中断', error: '采集失败', stopped: '采集已停止' }[this.microphoneCapture?.state] || '等待采集')}
                           </div>
+                          <div id="automaticRecordingState">
+                              ${this.t('自动录音')}：${this.t(this.microphoneCapture?.state === 'running' ? '录音中，停顿后自动转写' : '等待麦克风采集')}
+                          </div>
+                          <details id="microphoneDiagnostics">
+                              <summary>${this.t('采集诊断（仅数值，不保存音频）')}</summary>
+                              <div id="microphoneNumericLevel">
+                                  RMS ${(this.microphoneCapture?.rms || 0).toFixed(6)} · ${this.t('峰值')}
+                                  ${(this.microphoneCapture?.peakRms || 0).toFixed(6)} · ${this.t('音频帧')} ${this.microphoneCapture?.frames || 0} ·
+                                  ${this.t('处理模式')} ${this.microphoneCapture?.processing || '—'}
+                              </div>
+                          </details>
                           <button id="reconnectMicrophone" @click=${this.handleReconnectMicrophone} ?disabled=${this.isReconnectingMicrophone}>
                               ${this.t(this.isReconnectingMicrophone ? '正在重连…' : '重连麦克风')}
                           </button>

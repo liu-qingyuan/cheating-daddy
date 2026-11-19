@@ -190,6 +190,19 @@ const chinese = {
     'Paste your resume, job description, or any context for the AI...': '输入简历、题目背景或其他需要 AI 了解的信息…',
 };
 const english = {
+    麦克风处理模式: 'Microphone processing',
+    '原始输入（本地语音识别）': 'Raw input (local speech recognition)',
+    '通话处理（回声消除与降噪）': 'Communications DSP (echo cancellation and suppression)',
+    '持续自动录音与转写不变；切换处理模式后重连麦克风生效。':
+        'Continuous automatic recording remains enabled. Reconnect after changing processing mode.',
+    自动录音: 'Automatic recording',
+    '录音中，停顿后自动转写': 'Recording; transcribes automatically after a pause',
+    等待麦克风采集: 'Waiting for microphone capture',
+    '采集诊断（仅数值，不保存音频）': 'Capture diagnostics (numbers only, no stored audio)',
+    峰值: 'Peak',
+    音频帧: 'Frames',
+    处理模式: 'Processing',
+
     实际麦克风设备: 'Microphone device',
     跟随系统默认麦克风: 'System default microphone',
     '保存的麦克风当前不可用，请重新选择': 'Saved microphone is unavailable; select another',

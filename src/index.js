@@ -261,6 +261,48 @@ function setupStorageIpcHandlers() {
 }
 
 function setupGeneralIpcHandlers() {
+    ipcMain.handle('media-access-status', async (event, type, request = false) => {
+        if (event.sender !== mainWindow?.webContents || !['microphone', 'screen'].includes(type)) return { status: 'restricted' };
+        const { systemPreferences } = require('electron');
+        let status = process.platform === 'darwin' ? systemPreferences.getMediaAccessStatus(type) : 'granted';
+        if (type === 'microphone' && request === true && status === 'not-determined') {
+            await systemPreferences.askForMediaAccess('microphone');
+            status = systemPreferences.getMediaAccessStatus('microphone');
+        }
+        const state = { timestamp: Date.now(), type, status, processId: process.pid, executable: process.execPath };
+        await require('node:fs').promises.writeFile(
+            require('node:path').join(storage.getConfigDir(), 'media-access.json'),
+            JSON.stringify(state, null, 2)
+        );
+        return { status };
+    });
+
+    // One overwritten numeric snapshot: no audio, transcripts, keys or arbitrary destination paths.
+    let lastCaptureDiagnostic = {};
+    let diagnosticWrite = Promise.resolve();
+    ipcMain.handle('microphone-diagnostics', (event, data) => {
+        if (event.sender !== mainWindow?.webContents || !data || typeof data !== 'object') return { success: false };
+        const snapshot = { ...lastCaptureDiagnostic, timestamp: Date.now(), processId: process.pid };
+        if (process.platform === 'darwin') {
+            const { systemPreferences } = require('electron');
+            snapshot.microphonePermission = systemPreferences.getMediaAccessStatus('microphone');
+            snapshot.screenPermission = systemPreferences.getMediaAccessStatus('screen');
+        }
+        for (const key of ['rms', 'peakRms', 'frames', 'samples']) {
+            if (Number.isFinite(data[key]) && data[key] >= 0)
+                snapshot[key] = Math.min(data[key], key === 'rms' || key === 'peakRms' ? 1 : Number.MAX_SAFE_INTEGER);
+        }
+        for (const key of ['deviceLabel', 'state', 'contextState', 'processing']) {
+            if (typeof data[key] === 'string') snapshot[key] = data[key].slice(0, 256);
+        }
+        if (typeof data.muted === 'boolean') snapshot.muted = data.muted;
+        lastCaptureDiagnostic = snapshot;
+        const contents = JSON.stringify(snapshot, null, 2);
+        const destination = require('node:path').join(storage.getConfigDir(), 'microphone-capture.json');
+        diagnosticWrite = diagnosticWrite.catch(() => {}).then(() => require('node:fs').promises.writeFile(destination, contents));
+        return diagnosticWrite.then(() => ({ success: true }));
+    });
+
     ipcMain.handle('get-app-version', async () => {
         return app.getVersion();
     });

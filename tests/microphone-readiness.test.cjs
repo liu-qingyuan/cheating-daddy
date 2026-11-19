@@ -171,3 +171,121 @@ test('ending capture while a reconnect device request is pending stops the late 
         f.cleanup();
     }
 });
+test('subscription raw opt-in disables browser communications DSP', async () => {
+    const source = fs.readFileSync(path.join(__dirname, '../src/utils/renderer.js'), 'utf8');
+    const start = source.indexOf('function requestMicrophone('),
+        end = source.indexOf('\nfunction stopMicrophoneCapture(', start);
+    let options;
+    const context = {
+        preferencesCache: { providerMode: 'subscription', microphoneProcessing: 'raw' },
+        SAMPLE_RATE: 24000,
+        navigator: {
+            mediaDevices: {
+                getUserMedia: async value => {
+                    options = value;
+                    return 'stream';
+                },
+            },
+        },
+    };
+    vm.runInNewContext(source.slice(start, end) + '\nthis.request=requestMicrophone', context);
+    await context.request();
+    assert.equal(options.audio.echoCancellation, false);
+    assert.equal(options.audio.noiseSuppression, false);
+    assert.equal(options.audio.autoGainControl, false);
+});
+test('known communications capture is the default; raw remains explicit and other providers are unchanged', async () => {
+    const source = fs.readFileSync(path.join(__dirname, '../src/utils/renderer.js'), 'utf8');
+    const start = source.indexOf('function requestMicrophone('),
+        end = source.indexOf('\nfunction stopMicrophoneCapture(', start);
+    for (const prefs of [
+        { providerMode: 'subscription', microphoneProcessing: 'communications' },
+        { providerMode: 'subscription' },
+        { providerMode: 'byok' },
+    ]) {
+        let options;
+        const context = {
+            preferencesCache: prefs,
+            SAMPLE_RATE: 24000,
+            navigator: {
+                mediaDevices: {
+                    getUserMedia: async value => {
+                        options = value;
+                    },
+                },
+            },
+        };
+        vm.runInNewContext(source.slice(start, end) + '\nthis.request=requestMicrophone', context);
+        await context.request();
+        assert.equal(options.audio.echoCancellation, true);
+        assert.equal(options.audio.noiseSuppression, true);
+        assert.equal(options.audio.autoGainControl, true);
+    }
+});
+test('numeric diagnostic snapshot accepts only this renderer and excludes audio or question payloads', async () => {
+    const os = require('node:os');
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cd-microphone-'));
+    try {
+        const source = fs.readFileSync(path.join(__dirname, '../src/index.js'), 'utf8');
+        const start = source.indexOf('function setupGeneralIpcHandlers()');
+        const handlers = new Map();
+        const sender = {};
+        const context = {
+            mainWindow: { webContents: sender },
+            ipcMain: { handle: (name, fn) => handlers.set(name, fn), on() {} },
+            storage: { getConfigDir: () => directory },
+            require: name => (name === 'electron' ? { systemPreferences: { getMediaAccessStatus: () => 'granted' } } : require(name)),
+            process,
+            Date,
+            Promise,
+            Number,
+        };
+        vm.runInNewContext(source.slice(start) + '\nsetupGeneralIpcHandlers()', context);
+        const handle = handlers.get('microphone-diagnostics');
+        assert.equal((await handle({ sender: {} }, { state: 'running' })).success, false);
+        await handle(
+            { sender },
+            {
+                state: 'running',
+                rms: 0.01,
+                peakRms: 0.03,
+                frames: 12,
+                samples: 49152,
+                audio: 'NOT_TO_STORE',
+                transcript: 'NOT_TO_STORE',
+                destination: '/tmp/not-allowed',
+            }
+        );
+        const contents = fs.readFileSync(path.join(directory, 'microphone-capture.json'), 'utf8'),
+            saved = JSON.parse(contents);
+        assert.equal(saved.frames, 12);
+        assert.equal(saved.rms, 0.01);
+        assert.equal(saved.peakRms, 0.03);
+        assert.ok(!contents.includes('NOT_TO_STORE'));
+        assert.equal(saved.destination, undefined);
+    } finally {
+        fs.rmSync(directory, { recursive: true, force: true });
+    }
+});
+test('normal macOS microphone denial is visible before creating a silent stream', async () => {
+    const source = fs.readFileSync(path.join(__dirname, '../src/utils/renderer.js'), 'utf8');
+    const start = source.indexOf('function requestMicrophone('),
+        end = source.indexOf('\nfunction stopMicrophoneCapture(', start);
+    let acquired = false;
+    const context = {
+        preferencesCache: { providerMode: 'subscription' },
+        SAMPLE_RATE: 24000,
+        isMacOS: true,
+        ipcRenderer: { invoke: async () => ({ status: 'denied' }) },
+        navigator: {
+            mediaDevices: {
+                getUserMedia: async () => {
+                    acquired = true;
+                },
+            },
+        },
+    };
+    vm.runInNewContext(source.slice(start, end) + '\nthis.request=requestMicrophone', context);
+    await assert.rejects(context.request(), /macOS 未授权/);
+    assert.equal(acquired, false);
+});

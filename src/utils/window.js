@@ -35,9 +35,19 @@ function createWindow(sendToRenderer, geminiSessionRef) {
     const { session, desktopCapturer } = require('electron');
     session.defaultSession.setDisplayMediaRequestHandler(
         (request, callback) => {
-            desktopCapturer.getSources({ types: ['screen'] }).then(sources => {
-                callback({ video: sources[0], audio: 'loopback' });
-            });
+            desktopCapturer
+                .getSources({ types: ['screen'] })
+                .then(sources => {
+                    if (!sources.length) {
+                        callback({});
+                        return;
+                    }
+                    callback({ video: sources[0], ...(request.audioRequested ? { audio: 'loopback' } : {}) });
+                })
+                .catch(error => {
+                    sendToRenderer('update-status', '无法取得屏幕：' + error.message);
+                    callback({});
+                });
         },
         { useSystemPicker: true }
     );

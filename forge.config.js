@@ -31,6 +31,26 @@ module.exports = {
         //    teamId: 'your team id',
         // },
     },
+    hooks: {
+        postPackage: async (config, { platform, outputPaths }) => {
+            if (platform !== 'darwin' || process.platform !== 'darwin') return;
+            const execFile = require('node:util').promisify(require('node:child_process').execFile);
+            for (const output of outputPaths) {
+                const app = require('node:path').join(output, config.packagerConfig.name + '.app');
+                await execFile('/usr/bin/codesign', ['--force', '--deep', '--sign', '-', '--preserve-metadata=entitlements', app]);
+                await execFile('/usr/bin/codesign', [
+                    '--force',
+                    '--sign',
+                    '-',
+                    '--identifier',
+                    config.packagerConfig.appBundleId,
+                    '--preserve-metadata=entitlements',
+                    app,
+                ]);
+                await execFile('/usr/bin/codesign', ['--verify', '--deep', '--strict', '--verbose=2', app]);
+            }
+        },
+    },
     rebuildConfig: {},
     makers: [
         {

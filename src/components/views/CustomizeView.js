@@ -190,6 +190,7 @@ export class CustomizeView extends LocalizedElement {
         providerMode: { state: true },
         microphoneDevices: { state: true },
         microphoneDeviceId: { state: true },
+        microphoneProcessing: { state: true },
         microphoneError: { state: true },
         onProfileChange: { type: Function },
         onLanguageChange: { type: Function },
@@ -244,6 +245,7 @@ export class CustomizeView extends LocalizedElement {
             this.asrLanguage = prefs.asrLanguage || 'auto';
             this.providerMode = prefs.providerMode;
             this.microphoneDeviceId = prefs.microphoneDeviceId || '';
+            this.microphoneProcessing = prefs.microphoneProcessing || 'communications';
             void this.refreshMicrophones();
             this.audioMode = prefs.providerMode === 'subscription' ? prefs.subscriptionAudioMode || 'files_only' : prefs.audioMode || 'speaker_only';
             if (keybinds) {
@@ -501,6 +503,7 @@ export class CustomizeView extends LocalizedElement {
                 asrLanguage: 'auto',
                 subscriptionAudioMode: 'files_only',
                 microphoneDeviceId: '',
+                microphoneProcessing: 'communications',
                 selectedScreenshotInterval: '5',
                 selectedImageQuality: 'medium',
                 audioMode: 'speaker_only',
@@ -528,6 +531,7 @@ export class CustomizeView extends LocalizedElement {
             this.audioMode = this.providerMode === 'subscription' ? defaults.subscriptionAudioMode : defaults.audioMode;
             this.asrLanguage = defaults.asrLanguage;
             this.microphoneDeviceId = defaults.microphoneDeviceId;
+            this.microphoneProcessing = defaults.microphoneProcessing;
             setInterfaceLanguage(defaults.uiLanguage);
             this.fontSize = defaults.fontSize;
             this.backgroundTransparency = defaults.backgroundTransparency;
@@ -632,6 +636,29 @@ export class CustomizeView extends LocalizedElement {
                         ${this.microphoneError ? html`<div role="alert">${this.microphoneError}</div>` : ''}
                         <div>${this.t('设备在下次开始会话或重连时生效；通话耳机与电脑内置麦克风不是同一个输入。')}</div>
                     </div>
+                    ${
+                        this.providerMode === 'subscription'
+                            ? html`<div class="form-group">
+                                  <label class="form-label" for="microphoneProcessing">${this.t('麦克风处理模式')}</label>
+                                  <select
+                                      id="microphoneProcessing"
+                                      class="control"
+                                      @change=${async e => {
+                                          this.microphoneProcessing = e.target.value;
+                                          await cheatingDaddy.storage.updatePreference('microphoneProcessing', e.target.value);
+                                      }}
+                                  >
+                                      <option value="raw" .selected=${this.microphoneProcessing === 'raw'}>
+                                          ${this.t('原始输入（本地语音识别）')}
+                                      </option>
+                                      <option value="communications" .selected=${this.microphoneProcessing === 'communications'}>
+                                          ${this.t('通话处理（回声消除与降噪）')}
+                                      </option>
+                                  </select>
+                                  <div>${this.t('持续自动录音与转写不变；切换处理模式后重连麦克风生效。')}</div>
+                              </div>`
+                            : ''
+                    }
                     ${
                         this.audioMode !== 'speaker_only'
                             ? html`
