@@ -1,7 +1,8 @@
-import { html, css, LitElement } from '../../assets/lit-core-2.7.4.min.js';
+import { LocalizedElement } from '../../utils/localized-element.js';
+import { html, css } from '../../assets/lit-core-2.7.4.min.js';
 import { unifiedPageStyles } from './sharedPageStyles.js';
 
-export class AICustomizeView extends LitElement {
+export class AICustomizeView extends LocalizedElement {
     static styles = [
         unifiedPageStyles,
         css`
@@ -70,54 +71,53 @@ export class AICustomizeView extends LitElement {
 
     _getProfileName(profile) {
         const names = {
-            interview: 'Job Interview',
-            sales: 'Sales Call',
-            meeting: 'Business Meeting',
-            presentation: 'Presentation',
-            negotiation: 'Negotiation',
-            exam: 'Exam Assistant',
+            interview: this.t('Job Interview'),
+            sales: this.t('Sales Call'),
+            meeting: this.t('Business Meeting'),
+            presentation: this.t('Presentation'),
+            negotiation: this.t('Negotiation'),
+            exam: this.t('Exam Assistant'),
         };
         return names[profile] || profile;
     }
 
     render() {
         const profiles = [
-            { value: 'interview', label: 'Job Interview' },
-            { value: 'sales', label: 'Sales Call' },
-            { value: 'meeting', label: 'Business Meeting' },
-            { value: 'presentation', label: 'Presentation' },
-            { value: 'negotiation', label: 'Negotiation' },
-            { value: 'exam', label: 'Exam Assistant' },
+            { value: 'interview', label: this.t('Job Interview') },
+            { value: 'sales', label: this.t('Sales Call') },
+            { value: 'meeting', label: this.t('Business Meeting') },
+            { value: 'presentation', label: this.t('Presentation') },
+            { value: 'negotiation', label: this.t('Negotiation') },
+            { value: 'exam', label: this.t('Exam Assistant') },
         ];
 
         return html`
             <div class="unified-page">
                 <div class="unified-wrap">
                     <div>
-                        <div class="page-title">AI Context</div>
+                        <div class="page-title">${this.t('AI Context')}</div>
                     </div>
 
                     <section class="surface">
                         <div class="form-grid">
                             <div class="form-group">
-                                <label class="form-label">Profile</label>
+                                <label class="form-label">${this.t('Profile')}</label>
                                 <select class="control" .value=${this.selectedProfile} @change=${this._handleProfileChange}>
                                     ${profiles.map(profile => html`<option value=${profile.value}>${profile.label}</option>`)}
                                 </select>
                             </div>
                             <div class="form-group vertical">
-                                <label class="form-label">Custom Instructions</label>
+                                <label class="form-label">${this.t('Custom Instructions')}</label>
                                 <textarea
                                     class="control"
                                     placeholder="Resume details, role requirements, constraints..."
                                     .value=${this._context}
                                     @input=${e => this._saveContext(e.target.value)}
                                 ></textarea>
-                                <div class="form-help">Sent as context at session start. Keep it short.</div>
+                                <div class="form-help">${this.t('Sent as context at session start. Keep it short.')}</div>
                             </div>
                         </div>
                     </section>
-
                 </div>
             </div>
         `;

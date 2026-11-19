@@ -1,7 +1,8 @@
-import { html, css, LitElement } from '../../assets/lit-core-2.7.4.min.js';
+import { LocalizedElement } from '../../utils/localized-element.js';
+import { html, css } from '../../assets/lit-core-2.7.4.min.js';
 import { unifiedPageStyles } from './sharedPageStyles.js';
 
-export class HelpView extends LitElement {
+export class HelpView extends LocalizedElement {
     static styles = [
         unifiedPageStyles,
         css`
@@ -73,7 +74,10 @@ export class HelpView extends LitElement {
                 color: var(--text-primary);
                 font-size: var(--font-size-sm);
                 cursor: pointer;
-                transition: border-color var(--transition), color var(--transition), background var(--transition);
+                transition:
+                    border-color var(--transition),
+                    color var(--transition),
+                    background var(--transition);
             }
 
             .link-button:hover {
@@ -87,7 +91,6 @@ export class HelpView extends LitElement {
                     grid-template-columns: 1fr;
                 }
             }
-
         `,
     ];
 
@@ -142,42 +145,44 @@ export class HelpView extends LitElement {
 
     render() {
         const shortcutRows = [
-            ['Move Window Up', this.keybinds.moveUp],
-            ['Move Window Down', this.keybinds.moveDown],
-            ['Move Window Left', this.keybinds.moveLeft],
-            ['Move Window Right', this.keybinds.moveRight],
-            ['Toggle Visibility', this.keybinds.toggleVisibility],
-            ['Toggle Click-through', this.keybinds.toggleClickThrough],
-            ['Ask Next Step', this.keybinds.nextStep],
-            ['Previous Response', this.keybinds.previousResponse],
-            ['Next Response', this.keybinds.nextResponse],
-            ['Scroll Response Up', this.keybinds.scrollUp],
-            ['Scroll Response Down', this.keybinds.scrollDown],
+            [this.t('Move Window Up'), this.keybinds.moveUp],
+            [this.t('Move Window Down'), this.keybinds.moveDown],
+            [this.t('Move Window Left'), this.keybinds.moveLeft],
+            [this.t('Move Window Right'), this.keybinds.moveRight],
+            [this.t('Toggle Visibility'), this.keybinds.toggleVisibility],
+            [this.t('Toggle Click-through'), this.keybinds.toggleClickThrough],
+            [this.t('Ask Next Step'), this.keybinds.nextStep],
+            [this.t('Previous Response'), this.keybinds.previousResponse],
+            [this.t('Next Response'), this.keybinds.nextResponse],
+            [this.t('Scroll Response Up'), this.keybinds.scrollUp],
+            [this.t('Scroll Response Down'), this.keybinds.scrollDown],
         ];
 
         return html`
             <div class="unified-page">
                 <div class="unified-wrap">
-                    <div class="page-title">Help</div>
+                    <div class="page-title">${this.t('Help')}</div>
 
                     <section class="surface">
-                        <div class="surface-title">Support</div>
+                        <div class="surface-title">${this.t('Support')}</div>
                         <div class="link-row">
-                            <button class="link-button" @click=${() => this._open('https://cheatingdaddy.com')}>Website</button>
+                            <button class="link-button" @click=${() => this._open('https://cheatingdaddy.com')}>${this.t('Website')}</button>
                             <button class="link-button" @click=${() => this._open('https://github.com/sohzm/cheating-daddy')}>GitHub</button>
                             <button class="link-button" @click=${() => this._open('https://discord.gg/GCBdubnXfJ')}>Discord</button>
                         </div>
                     </section>
 
                     <section class="surface">
-                        <div class="surface-title">Keyboard Shortcuts</div>
+                        <div class="surface-title">${this.t('Keyboard Shortcuts')}</div>
                         <div class="shortcut-grid">
-                            ${shortcutRows.map(([label, keys]) => html`
-                                <div class="shortcut-row">
-                                    <span class="shortcut-label">${label}</span>
-                                    <span class="shortcut-keys">${this._formatKeybind(keys)}</span>
-                                </div>
-                            `)}
+                            ${shortcutRows.map(
+                                ([label, keys]) => html`
+                                    <div class="shortcut-row">
+                                        <span class="shortcut-label">${label}</span>
+                                        <span class="shortcut-keys">${this._formatKeybind(keys)}</span>
+                                    </div>
+                                `
+                            )}
                         </div>
                     </section>
                 </div>

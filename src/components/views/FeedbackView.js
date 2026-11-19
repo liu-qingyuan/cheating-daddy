@@ -1,9 +1,10 @@
-import { html, css, LitElement } from '../../assets/lit-core-2.7.4.min.js';
+import { LocalizedElement } from '../../utils/localized-element.js';
+import { html, css } from '../../assets/lit-core-2.7.4.min.js';
 import { unifiedPageStyles } from './sharedPageStyles.js';
 
 const FEEDBACK_FORM_URL = 'https://forms.gle/1JPoh81mUPkJMvje7';
 
-export class FeedbackView extends LitElement {
+export class FeedbackView extends LocalizedElement {
     static styles = [
         unifiedPageStyles,
         css`
@@ -29,15 +30,11 @@ export class FeedbackView extends LitElement {
         return html`
             <div class="unified-page">
                 <div class="unified-wrap">
-                    <div class="page-title">Feedback</div>
+                    <div class="page-title">${this.t('Feedback')}</div>
 
                     <section class="surface">
                         <div class="feedback-embed">
-                            <iframe
-                                class="feedback-iframe"
-                                src=${FEEDBACK_FORM_URL}
-                                title="Feedback Form"
-                            ></iframe>
+                            <iframe class="feedback-iframe" src=${FEEDBACK_FORM_URL} title="Feedback Form"></iframe>
                         </div>
                     </section>
                 </div>

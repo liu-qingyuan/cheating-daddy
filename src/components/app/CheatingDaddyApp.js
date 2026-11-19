@@ -1,4 +1,5 @@
-import { html, css, LitElement } from '../../assets/lit-core-2.7.4.min.js';
+import { LocalizedElement, setInterfaceLanguage } from '../../utils/localized-element.js';
+import { html, css } from '../../assets/lit-core-2.7.4.min.js';
 import { MainView } from '../views/MainView.js';
 import { CustomizeView } from '../views/CustomizeView.js';
 import { HelpView } from '../views/HelpView.js';
@@ -8,7 +9,7 @@ import { OnboardingView } from '../views/OnboardingView.js';
 import { AICustomizeView } from '../views/AICustomizeView.js';
 import { FeedbackView } from '../views/FeedbackView.js';
 
-export class CheatingDaddyApp extends LitElement {
+export class CheatingDaddyApp extends LocalizedElement {
     static styles = css`
         * {
             box-sizing: border-box;
@@ -389,6 +390,11 @@ export class CheatingDaddyApp extends LitElement {
         _whisperDownloading: { state: true },
         _localAiDownloadProgress: { state: true },
         _lastTranscript: { state: true },
+        _transcripts: { state: true },
+        _audioLevels: { state: true },
+        _activeInputMode: { state: true },
+        _answerLanguage: { state: true },
+        _asrLanguage: { state: true },
         _sessionInitializing: { state: true },
     };
 
@@ -400,12 +406,14 @@ export class CheatingDaddyApp extends LitElement {
         this.isRecording = false;
         this.sessionActive = false;
         this.selectedProfile = 'interview';
-        this.selectedLanguage = 'en-US';
+        this.selectedLanguage = 'cmn-CN';
         this.selectedScreenshotInterval = '5';
         this.selectedImageQuality = 'medium';
         this.layoutMode = 'normal';
         this.responses = [];
         this._lastTranscript = '';
+        this._transcripts = [];
+        this._audioLevels = {};
         this._sessionInitializing = false;
         this.currentResponseIndex = -1;
         this._viewInstances = new Map();
@@ -453,7 +461,8 @@ export class CheatingDaddyApp extends LitElement {
 
             this.currentView = config.onboarded ? 'main' : 'onboarding';
             this.selectedProfile = prefs.selectedProfile || 'interview';
-            this.selectedLanguage = prefs.selectedLanguage || 'en-US';
+            this.selectedLanguage = prefs.selectedLanguage || 'cmn-CN';
+            setInterfaceLanguage(prefs.uiLanguage || 'zh-CN');
             this.selectedScreenshotInterval = prefs.selectedScreenshotInterval || '5';
             this.selectedImageQuality = prefs.selectedImageQuality || 'medium';
             this.layoutMode = config.layout || 'normal';
@@ -476,8 +485,14 @@ export class CheatingDaddyApp extends LitElement {
             ipcRenderer.on('session-initializing', (_, value) => {
                 this._sessionInitializing = value;
             });
-            ipcRenderer.on('subscription-transcript', (_, text) => {
-                this._lastTranscript = text;
+            ipcRenderer.on('subscription-transcript', (_, data) => {
+                const item = typeof data === 'string' ? { text: data, source: 'file' } : data;
+                if (!item?.text) return;
+                this._lastTranscript = item.text;
+                this._transcripts = [...this._transcripts, item].slice(-20);
+            });
+            ipcRenderer.on('subscription-audio-level', (_, data) => {
+                if (data && ['mic', 'system'].includes(data.source)) this._audioLevels = { ...this._audioLevels, [data.source]: data.rms };
             });
             ipcRenderer.on('update-response', (_, response) => this.updateCurrentResponse(response));
             ipcRenderer.on('update-status', (_, status) => this.setStatus(status));
@@ -502,6 +517,7 @@ export class CheatingDaddyApp extends LitElement {
             ipcRenderer.removeAllListeners('new-response');
             ipcRenderer.removeAllListeners('update-response');
             ipcRenderer.removeAllListeners('subscription-transcript');
+            ipcRenderer.removeAllListeners('subscription-audio-level');
             ipcRenderer.removeAllListeners('session-initializing');
             ipcRenderer.removeAllListeners('update-status');
             ipcRenderer.removeAllListeners('click-through-toggled');
@@ -581,6 +597,8 @@ export class CheatingDaddyApp extends LitElement {
                 await ipcRenderer.invoke('close-session');
             }
             this.sessionActive = false;
+            this.statusText = '';
+            this._audioLevels = {};
             this._stopTimer();
             this.currentView = 'main';
         } else {
@@ -665,6 +683,11 @@ export class CheatingDaddyApp extends LitElement {
         }
         this.responses = [];
         this._lastTranscript = '';
+        this._transcripts = [];
+        this._audioLevels = {};
+        this._activeInputMode = providerMode === 'subscription' ? prefs.subscriptionAudioMode || 'files_only' : null;
+        this._answerLanguage = prefs.selectedLanguage || 'cmn-CN';
+        this._asrLanguage = prefs.asrLanguage || 'auto';
         this._sessionInitializing = false;
         this.currentResponseIndex = -1;
         this.startTime = Date.now();
@@ -822,6 +845,11 @@ export class CheatingDaddyApp extends LitElement {
                 return html`
                     <assistant-view
                         .transcript=${this._lastTranscript}
+                        .transcripts=${this._transcripts}
+                        .audioLevels=${this._audioLevels}
+                        .inputMode=${this._activeInputMode}
+                        .answerLanguage=${this._answerLanguage}
+                        .asrLanguage=${this._asrLanguage}
                         .responses=${this.responses}
                         .currentResponseIndex=${this.currentResponseIndex}
                         .selectedProfile=${this.selectedProfile}
@@ -845,7 +873,7 @@ export class CheatingDaddyApp extends LitElement {
         const items = [
             {
                 id: 'main',
-                label: 'Home',
+                label: this.t('Home'),
                 icon: html`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24">
                     <g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2">
                         <path
@@ -857,7 +885,7 @@ export class CheatingDaddyApp extends LitElement {
             },
             {
                 id: 'ai-customize',
-                label: 'AI Customization',
+                label: this.t('AI Customization'),
                 icon: html`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24">
                     <path
                         fill="none"
@@ -871,7 +899,7 @@ export class CheatingDaddyApp extends LitElement {
             },
             {
                 id: 'history',
-                label: 'History',
+                label: this.t('History'),
                 icon: html`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24">
                     <g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2">
                         <path
@@ -883,7 +911,7 @@ export class CheatingDaddyApp extends LitElement {
             },
             {
                 id: 'customize',
-                label: 'Settings',
+                label: this.t('Settings'),
                 icon: html`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24">
                     <g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2">
                         <path
@@ -895,7 +923,7 @@ export class CheatingDaddyApp extends LitElement {
             },
             {
                 id: 'feedback',
-                label: 'Feedback',
+                label: this.t('Feedback'),
                 icon: html`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24">
                     <g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2">
                         <path d="M18 4a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3h-5l-5 3v-3H6a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3zM9.5 9h.01m4.99 0h.01" />
@@ -905,7 +933,7 @@ export class CheatingDaddyApp extends LitElement {
             },
             {
                 id: 'help',
-                label: 'Help',
+                label: this.t('Help'),
                 icon: html`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24">
                     <g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2">
                         <path d="M12 3c7.2 0 9 1.8 9 9s-1.8 9-9 9s-9-1.8-9-9s1.8-9 9-9m0 13v.01" />
@@ -946,9 +974,8 @@ export class CheatingDaddyApp extends LitElement {
                                               stroke-linejoin="round"
                                               stroke-width="2"
                                               d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2M7 11l5 5l5-5m-5-7v12"
-                                          />
-                                      </svg>
-                                      Update available
+                                          /></svg
+                                      >${this.t('Update available')}
                                   </button>
                               `
                             : html` <div class="version-text">v${this._localVersion}</div> `
@@ -962,18 +989,18 @@ export class CheatingDaddyApp extends LitElement {
         if (!this._isLiveMode()) return '';
 
         const profileLabels = {
-            interview: 'Interview',
-            sales: 'Sales Call',
-            meeting: 'Meeting',
-            presentation: 'Presentation',
-            negotiation: 'Negotiation',
-            exam: 'Exam',
+            interview: this.t('Interview'),
+            sales: this.t('Sales Call'),
+            meeting: this.t('Meeting'),
+            presentation: this.t('Presentation'),
+            negotiation: this.t('Negotiation'),
+            exam: this.t('Exam'),
         };
 
         return html`
             <div class="live-bar">
                 <div class="live-bar-left">
-                    <button class="live-bar-back" @click=${() => this.handleClose()} title="End session">
+                    <button class="live-bar-back" @click=${() => this.handleClose()} title=${this.t('End session')}>
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
                             <path
                                 fill-rule="evenodd"
@@ -983,12 +1010,12 @@ export class CheatingDaddyApp extends LitElement {
                         </svg>
                     </button>
                 </div>
-                <div class="live-bar-center">${profileLabels[this.selectedProfile] || 'Session'}</div>
+                <div class="live-bar-center">${profileLabels[this.selectedProfile] || this.t('Session')}</div>
                 <div class="live-bar-right">
-                    ${this.statusText ? html`<span class="live-bar-text">${this.statusText}</span>` : ''}
+                    ${this.statusText ? html`<span class="live-bar-text">${this.t(this.statusText)}</span>` : ''}
                     <span class="live-bar-text">${this.getElapsedTime()}</span>
-                    ${this._isClickThrough ? html`<span class="live-bar-text">[click through]</span>` : ''}
-                    <span class="live-bar-text clickable" @click=${() => this.handleHideToggle()}>[hide]</span>
+                    ${this._isClickThrough ? html`<span class="live-bar-text">${this.t('[click through]')}</span>` : ''}
+                    <span class="live-bar-text clickable" @click=${() => this.handleHideToggle()}>${this.t('[hide]')}</span>
                 </div>
             </div>
         `;
@@ -1006,9 +1033,9 @@ export class CheatingDaddyApp extends LitElement {
             <div class="app-shell">
                 <div class="top-drag-bar ${isLive ? 'hidden' : ''}">
                     <div class="traffic-lights">
-                        <button class="traffic-light close" @click=${() => this.handleClose()} title="Close"></button>
-                        <button class="traffic-light minimize" @click=${() => this._handleMinimize()} title="Minimize"></button>
-                        <button class="traffic-light maximize" title="Maximize"></button>
+                        <button class="traffic-light close" @click=${() => this.handleClose()} title=${this.t('Close')}></button>
+                        <button class="traffic-light minimize" @click=${() => this._handleMinimize()} title=${this.t('Minimize')}></button>
+                        <button class="traffic-light maximize" title=${this.t('Maximize')}></button>
                     </div>
                     <div class="drag-region"></div>
                 </div>

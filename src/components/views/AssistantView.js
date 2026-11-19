@@ -1,6 +1,7 @@
-import { html, css, LitElement } from '../../assets/lit-core-2.7.4.min.js';
+import { LocalizedElement } from '../../utils/localized-element.js';
+import { html, css } from '../../assets/lit-core-2.7.4.min.js';
 
-export class AssistantView extends LitElement {
+export class AssistantView extends LocalizedElement {
     static styles = css`
         :host {
             height: 100%;
@@ -315,6 +316,12 @@ export class AssistantView extends LitElement {
     static properties = {
         responses: { type: Array },
         transcript: { type: String },
+        transcripts: { type: Array },
+        audioLevels: { type: Object },
+        inputMode: { type: String },
+        answerLanguage: { type: String },
+        asrLanguage: { type: String },
+        isSubmittingSpeech: { state: true },
         currentResponseIndex: { type: Number },
         selectedProfile: { type: String },
         onSendText: { type: Function },
@@ -326,6 +333,9 @@ export class AssistantView extends LitElement {
         super();
         this.responses = [];
         this.transcript = '';
+        this.transcripts = [];
+        this.audioLevels = {};
+        this.isSubmittingSpeech = false;
         this.currentResponseIndex = -1;
         this.selectedProfile = 'interview';
         this.onSendText = () => {};
@@ -335,20 +345,19 @@ export class AssistantView extends LitElement {
 
     getProfileNames() {
         return {
-            interview: 'Job Interview',
-            sales: 'Sales Call',
-            meeting: 'Business Meeting',
-            presentation: 'Presentation',
-            negotiation: 'Negotiation',
-            exam: 'Exam Assistant',
+            interview: this.t('Job Interview'),
+            sales: this.t('Sales Call'),
+            meeting: this.t('Business Meeting'),
+            presentation: this.t('Presentation'),
+            negotiation: this.t('Negotiation'),
+            exam: this.t('Exam Assistant'),
         };
     }
 
     getCurrentResponse() {
-        const profileNames = this.getProfileNames();
         return this.responses.length > 0 && this.currentResponseIndex >= 0
             ? this.responses[this.currentResponseIndex]
-            : `Listening to your ${profileNames[this.selectedProfile] || 'session'}...`;
+            : this.t('等待题目。说话后停顿约 1 秒；未提交时可点击“提交刚才语音”。文件模式请导入音频或截图。');
     }
 
     renderMarkdown(content) {
@@ -647,7 +656,7 @@ export class AssistantView extends LitElement {
 
     updated(changedProperties) {
         super.updated(changedProperties);
-        if (changedProperties.has('responses') || changedProperties.has('currentResponseIndex')) {
+        if (changedProperties.has('responses') || changedProperties.has('currentResponseIndex') || changedProperties.has('uiLanguage')) {
             this.updateResponseContent();
         }
 
@@ -684,7 +693,7 @@ export class AssistantView extends LitElement {
         if (!file) return;
         this.isAnalyzing = true;
         const message = this.shadowRoot.querySelector('#importStatus');
-        message.textContent = '处理中：' + file.name;
+        message.textContent = this.t('处理中：') + file.name;
         try {
             if (file.size > 12 * 1024 * 1024) throw new Error('文件不能超过 12 MB。');
             const data = await new Promise((resolve, reject) => {
@@ -698,20 +707,89 @@ export class AssistantView extends LitElement {
                 ? await ipcRenderer.invoke('subscription-transcribe-wav', data, true)
                 : await ipcRenderer.invoke('send-image-content', { data, prompt: '请解答图片中的题目，说明思路；编程题给出代码和复杂度。' });
             if (!result.success) throw new Error(result.error);
-            message.textContent = result.transcript ? '本地转写：' + result.transcript : '图片解题完成';
+            message.textContent = result.transcript ? this.t('本地转写：') + result.transcript : this.t('图片解题完成');
         } catch (error) {
-            message.textContent = '失败：' + error.message;
+            message.textContent = this.t('失败：') + error.message;
         } finally {
             this.isAnalyzing = false;
             input.value = '';
         }
     }
 
+    async handleSubmitSpeech() {
+        this.isSubmittingSpeech = true;
+        try {
+            const result = await window.require('electron').ipcRenderer.invoke('subscription-flush-audio');
+            cheatingDaddy.setStatus(result.success ? this.t('语音已提交并完成回答') : result.error);
+        } catch (error) {
+            cheatingDaddy.setStatus(error.message);
+        } finally {
+            this.isSubmittingSpeech = false;
+        }
+    }
+
+    renderSpeechPanel() {
+        if (!this.inputMode) return '';
+        const labels = {
+            mic_only: this.t('麦克风（我 / 自测提问）'),
+            speaker_only: this.t('系统声音（对方 / 面试官）'),
+            both: this.t('麦克风与系统声音（分别标记来源）'),
+            files_only: this.t('仅导入文件（不开麦克风）'),
+        };
+        const sourceLabels = { mic: '我 · 麦克风', system: '对方 · 系统声音', file: '导入音频' };
+        const language =
+            this.answerLanguage === 'cmn-CN' || this.answerLanguage === 'zh-CN'
+                ? '简体中文'
+                : this.answerLanguage === 'auto'
+                  ? this.t('跟随题目语言')
+                  : this.answerLanguage;
+        return html`<section
+            id="speechPanel"
+            style="padding:12px 16px;color:var(--text-primary);border-bottom:1px solid var(--border-color);max-height:40vh;overflow:auto;flex-shrink:0"
+        >
+            <div>${this.t('输入来源')}：${this.t(labels[this.inputMode] || this.inputMode)}</div>
+            <div>
+                ${this.t('Answer language')}：${this.t(language)} ·
+                ${this.t('Speech recognition language')}：${this.t(this.asrLanguage === 'auto' ? '自动识别中英文' : this.asrLanguage === 'Chinese' ? '中文' : 'English')}
+            </div>
+            ${
+                this.inputMode !== 'files_only'
+                    ? html`
+                          <div>
+                              ${this.t('按声音来源标记，不是声纹识人；同一麦克风录到两个人时无法自动区分。自测请选麦克风，双方通话建议戴耳机。')}
+                          </div>
+                          ${['mic', 'system']
+                              .filter(source => this.inputMode === 'both' || this.inputMode === (source === 'mic' ? 'mic_only' : 'speaker_only'))
+                              .map(
+                                  source =>
+                                      html` <label style="display:block"
+                                          >${this.t(sourceLabels[source])} · ${this.t('输入电平')}
+                                          <meter
+                                              min="0"
+                                              max="0.06"
+                                              .value=${this.audioLevels[source] || 0}
+                                              aria-label=${this.t(sourceLabels[source])}
+                                          ></meter>
+                                      </label>`
+                              )}
+                          <button id="submitSpeech" @click=${this.handleSubmitSpeech} ?disabled=${this.isSubmittingSpeech}>
+                              ${this.t(this.isSubmittingSpeech ? '识别并回答中…' : '提交刚才语音')}
+                          </button>
+                          <div>${this.t('说完停顿约 1 秒会自动提交；一直有背景声时可手动提交。电平不动请检查音源和麦克风权限。')}</div>
+                      `
+                    : html`<div>${this.t('当前未开启麦克风；直接说话不会触发回答。请结束会话，在首页改选麦克风后重新开始。')}</div>`
+            }
+            <div style="margin-top:8px">${this.t('语音提问记录')}：</div>
+            ${this.transcripts.length ? this.transcripts.map(item => html`<div class="speech-turn" style="padding:5px 0"><strong>${this.t(sourceLabels[item.source] || '导入音频')}：</strong>${item.text}</div>`) : html`<div>${this.t('还没有转写结果。输入电平表示收到声音，不代表已识别成文字。')}</div>`}
+        </section>`;
+    }
+
     render() {
         const hasMultipleResponses = this.responses.length > 1;
 
         return html`
-            ${this.transcript ? html`<div style="padding:8px 16px;color:var(--text-primary)">本地转写：${this.transcript}</div>` : ''}
+            ${this.renderSpeechPanel()}
+            <div style="padding:6px 16px;color:var(--text-primary)">${this.t('AI 回答')}</div>
             <div class="response-container" id="responseContainer"></div>
 
             ${
@@ -722,7 +800,7 @@ export class AssistantView extends LitElement {
                                   class="nav-btn"
                                   @click=${this.navigateToPreviousResponse}
                                   ?disabled=${this.currentResponseIndex <= 0}
-                                  title="Previous response"
+                                  title=${this.t('Previous response')}
                               >
                                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
                                       <path
@@ -732,12 +810,12 @@ export class AssistantView extends LitElement {
                                       />
                                   </svg>
                               </button>
-                              <span class="response-counter">${this.currentResponseIndex + 1} of ${this.responses.length}</span>
+                              <span class="response-counter">${this.currentResponseIndex + 1} / ${this.responses.length}</span>
                               <button
                                   class="nav-btn"
                                   @click=${this.navigateToNextResponse}
                                   ?disabled=${this.currentResponseIndex >= this.responses.length - 1}
-                                  title="Next response"
+                                  title=${this.t('Next response')}
                               >
                                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
                                       <path
@@ -753,15 +831,13 @@ export class AssistantView extends LitElement {
             }
 
             <div style="padding:8px 16px; display:flex; gap:12px; align-items:center; flex-wrap:wrap; color:var(--text-primary)">
-                <label style="cursor:pointer"
-                    >导入截图或 WAV 音频解题
-                    <input id="questionFile" type="file" accept="image/png,image/jpeg,audio/wav,.wav" @change=${this.handleQuestionFile} />
-                </label>
+                <button @click=${() => this.shadowRoot.querySelector('#questionFile').click()}>${this.t('导入截图或 WAV 音频解题')}</button>
+                <input id="questionFile" type="file" accept="image/png,image/jpeg,audio/wav,.wav" @change=${this.handleQuestionFile} hidden />
                 <span id="importStatus" role="status" style="font-size:12px"></span>
             </div>
             <div class="input-bar">
                 <div class="input-bar-inner">
-                    <input type="text" id="textInput" placeholder="Type a message..." @keydown=${this.handleTextKeydown} />
+                    <input type="text" id="textInput" placeholder=${this.t('Type a message...')} @keydown=${this.handleTextKeydown} />
                 </div>
                 <button class="analyze-btn ${this.isAnalyzing ? 'analyzing' : ''}" @click=${this.handleScreenAnswer}>
                     <canvas class="analyze-canvas"></canvas>
@@ -774,10 +850,9 @@ export class AssistantView extends LitElement {
                                 stroke-linejoin="round"
                                 stroke-width="2"
                                 d="M13 3v7h6l-8 11v-7H5z"
-                            />
-                        </svg>
-                        Analyze Screen
-                    </span>
+                            /></svg
+                        >${this.t('Analyze Screen')}</span
+                    >
                 </button>
             </div>
         `;

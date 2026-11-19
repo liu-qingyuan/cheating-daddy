@@ -1,4 +1,5 @@
-import { html, css, LitElement } from '../../assets/lit-core-2.7.4.min.js';
+import { LocalizedElement } from '../../utils/localized-element.js';
+import { html, css } from '../../assets/lit-core-2.7.4.min.js';
 
 const LOCAL_LLM_PRESETS = [
     { value: 'unsloth/Qwen3.5-0.8B-GGUF:Q4_K_M', label: 'Qwen 3.5 0.8B Q4 — 0.74 GB · Fastest' },
@@ -13,7 +14,7 @@ const LOCAL_LLM_PRESETS = [
     { value: 'unsloth/Qwen3.5-35B-A3B-GGUF:Q4_K_M', label: 'Qwen 3.5 35B-A3B Q4 — 22.92 GB · Largest' },
 ];
 
-export class MainView extends LitElement {
+export class MainView extends LocalizedElement {
     static styles = css`
         * {
             font-family: var(--font);
@@ -714,6 +715,8 @@ export class MainView extends LitElement {
         _voxtAsrExecutable: { state: true },
         _codexExecutable: { state: true },
         _subscriptionAudioMode: { state: true },
+        _answerLanguage: { state: true },
+        _asrLanguage: { state: true },
     };
 
     constructor() {
@@ -790,6 +793,8 @@ export class MainView extends LitElement {
             this._voxtAsrExecutable = prefs.voxtAsrExecutable || '';
             this._codexExecutable = prefs.codexExecutable || '';
             this._subscriptionAudioMode = prefs.subscriptionAudioMode || 'files_only';
+            this._answerLanguage = prefs.selectedLanguage || 'cmn-CN';
+            this._asrLanguage = prefs.asrLanguage || 'auto';
 
             this.requestUpdate();
         } catch (e) {
@@ -1129,7 +1134,7 @@ export class MainView extends LitElement {
                         : ''
                 }
                 <span class="btn-label">
-                    ${isDownloading ? (hasPercentage ? `${percentage}%` : 'Preparing...') : 'Start Session'}
+                    ${isDownloading ? (hasPercentage ? `${percentage}%` : this.t('Preparing...')) : this.t('Start Session')}
                     ${isDownloading ? '' : html`<span class="shortcut-hint">${isMac ? cmdIcon : ctrlIcon}${enterIcon}</span>`}
                 </span>
             </button>
@@ -1138,7 +1143,7 @@ export class MainView extends LitElement {
                     ? html`
                           <div class="download-controls">
                               <span>Downloading: ${this.downloadProgress.label || 'Local AI files'}</span>
-                              <button class="download-cancel" @click=${() => this.onCancelDownload()}>Cancel</button>
+                              <button class="download-cancel" @click=${() => this.onCancelDownload()}>${this.t('Cancel')}</button>
                           </div>
                       `
                     : ''
@@ -1175,7 +1180,7 @@ export class MainView extends LitElement {
             <details class="config-section">
                 <summary class="config-summary">
                     <span class="config-summary-text">
-                        <span class="config-summary-title">Transcription</span>
+                        <span class="config-summary-title">${this.t('Transcription')}</span>
                         <span class="config-summary-description">Gemini Live connection</span>
                     </span>
                     ${this._renderConfigChevron()}
@@ -1265,7 +1270,7 @@ export class MainView extends LitElement {
             <details class="config-section">
                 <summary class="config-summary">
                     <span class="config-summary-text">
-                        <span class="config-summary-title">Language model</span>
+                        <span class="config-summary-title">${this.t('Language model')}</span>
                         <span class="config-summary-description">Local GGUF model</span>
                     </span>
                     ${this._renderConfigChevron()}
@@ -1300,7 +1305,7 @@ export class MainView extends LitElement {
             <details class="config-section">
                 <summary class="config-summary">
                     <span class="config-summary-text">
-                        <span class="config-summary-title">Transcription</span>
+                        <span class="config-summary-title">${this.t('Transcription')}</span>
                         <span class="config-summary-description">Whisper speech-to-text model</span>
                     </span>
                     ${this._renderConfigChevron()}
@@ -1335,7 +1340,7 @@ export class MainView extends LitElement {
     _renderSubscriptionMode() {
         const field = (key, state, label) =>
             html` <label class="form-group"
-                ><span class="form-label">${label}</span>
+                ><span class="form-label">${this.t(label)}</span>
                 <input
                     type="text"
                     .value=${this[state]}
@@ -1347,10 +1352,10 @@ export class MainView extends LitElement {
             </label>`;
         return html`
             <div class="config-note">
-                中英文语音在本机 Qwen3-ASR 转写；文字和截图交给已登录的 Codex。使用 ChatGPT 订阅额度，不自动使用付费 API。原始音频不上传。
+                ${this.t('中英文语音在本机 Qwen3-ASR 转写；文字和截图交给已登录的 Codex。使用 ChatGPT 订阅额度，不自动使用付费 API。原始音频不上传。')}
             </div>
             <label class="form-group"
-                ><span class="form-label">语音输入来源</span>
+                ><span class="form-label">${this.t('语音输入来源')}</span>
                 <select
                     .value=${this._subscriptionAudioMode}
                     @change=${async e => {
@@ -1358,26 +1363,33 @@ export class MainView extends LitElement {
                         await cheatingDaddy.storage.updatePreference('subscriptionAudioMode', e.target.value);
                     }}
                 >
-                    <option value="files_only">只导入音频与截图（不持续录音）</option>
-                    <option value="mic_only">麦克风（中英文自动识别）</option>
-                    <option value="speaker_only">系统声音</option>
-                    <option value="both">麦克风与系统声音</option>
+                    <option value="files_only" .selected=${this._subscriptionAudioMode === 'files_only'}>
+                        ${this.t('只导入音频与截图（不持续录音）')}
+                    </option>
+                    <option value="mic_only" .selected=${this._subscriptionAudioMode === 'mic_only'}>${this.t('麦克风（中英文自动识别）')}</option>
+                    <option value="speaker_only" .selected=${this._subscriptionAudioMode === 'speaker_only'}>${this.t('系统声音')}</option>
+                    <option value="both" .selected=${this._subscriptionAudioMode === 'both'}>${this.t('麦克风与系统声音')}</option>
                 </select>
             </label>
             <details class="config-section">
-                <summary class="config-summary">模型与运行时路径（高级）</summary>
+                <summary class="config-summary">${this.t('模型与运行时路径（高级）')}</summary>
                 <div class="config-content">
-                    ${field('voxtModelDirectory', '_voxtModelDirectory', '本地 Qwen3-ASR 模型文件夹')}
-                    ${field('voxtAsrExecutable', '_voxtAsrExecutable', 'VOXT ASR 运行时')}
-                    ${field('codexExecutable', '_codexExecutable', 'Codex 可执行文件（留空自动检测）')}
-                    <div class="form-hint">需保留 Voxt.app，并先在终端运行 codex login，通过 ChatGPT 登录。</div>
+                    ${field('voxtModelDirectory', '_voxtModelDirectory', this.t('本地 Qwen3-ASR 模型文件夹'))}
+                    ${field('voxtAsrExecutable', '_voxtAsrExecutable', this.t('VOXT ASR 运行时'))}
+                    ${field('codexExecutable', '_codexExecutable', this.t('Codex 可执行文件（留空自动检测）'))}
+                    <div class="form-hint">${this.t('需保留 Voxt.app，并先在终端运行 codex login，通过 ChatGPT 登录。')}</div>
                 </div>
             </details>
+            <div class="form-hint">
+                ${this.t('Answer language')}：${this.t(this._answerLanguage === 'cmn-CN' ? '简体中文' : this._answerLanguage === 'auto' ? 'Follow the question language' : this._answerLanguage || '简体中文')}
+                ·
+                ${this.t('Speech recognition language')}：${this.t(this._asrLanguage === 'auto' ? '自动识别中英文' : this._asrLanguage === 'Chinese' ? '中文' : 'English')}
+            </div>
             ${this._renderStartButton()}
-            <div role="status">${this.statusText}</div>
+            <div role="status">${this.t(this.statusText)}</div>
             <div class="mode-links">
-                <button class="mode-link" @click=${() => this._saveMode('byok')}>API Key 模式</button>
-                <button class="mode-link" @click=${() => this._saveMode('local')}>全部本地模式</button>
+                <button class="mode-link" @click=${() => this._saveMode('byok')}>${this.t('API Key 模式')}</button>
+                <button class="mode-link" @click=${() => this._saveMode('local')}>${this.t('全部本地模式')}</button>
             </div>
         `;
     }
@@ -1401,18 +1413,19 @@ export class MainView extends LitElement {
                     this._mode === 'local'
                         ? html`
                               <div class="title-row">
-                                  <div class="page-title">Cheating Daddy <span class="mode-suffix">Local AI</span></div>
+                                  <div class="page-title">Cheating Daddy <span class="mode-suffix">${this.t('Local AI')}</span></div>
                                   <button class="help-btn" @click=${this._openLocalHelp} aria-label="Open Local AI help">${helpIcon}</button>
                               </div>
                           `
                         : html`
                               <div class="page-title">
-                                  Cheating Daddy <span class="mode-suffix">${this._mode === 'subscription' ? 'Local GPT' : 'BYOK'}</span>
+                                  Cheating Daddy
+                                  <span class="mode-suffix">${this._mode === 'subscription' ? this.t('Local GPT') : this.t('BYOK')}</span>
                               </div>
                           `
                 }
                 <div class="page-subtitle">
-                    ${this._mode === 'subscription' ? '本地中英文语音 · GPT 订阅解题' : this._mode === 'byok' ? 'Bring your own API keys' : 'Run models locally on your machine'}
+                    ${this._mode === 'subscription' ? this.t('本地中英文语音 · GPT 订阅解题') : this._mode === 'byok' ? this.t('Bring your own API keys') : this.t('Run models locally on your machine')}
                 </div>
 
                 <!-- Cloud mode render branch intentionally disabled. -->

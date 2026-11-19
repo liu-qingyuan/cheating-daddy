@@ -1,7 +1,8 @@
-import { html, css, LitElement } from '../../assets/lit-core-2.7.4.min.js';
+import { LocalizedElement } from '../../utils/localized-element.js';
+import { html, css } from '../../assets/lit-core-2.7.4.min.js';
 import { unifiedPageStyles } from './sharedPageStyles.js';
 
-export class HistoryView extends LitElement {
+export class HistoryView extends LocalizedElement {
     static styles = [
         unifiedPageStyles,
         css`
@@ -317,27 +318,27 @@ export class HistoryView extends LitElement {
 
     formatDate(timestamp) {
         const date = new Date(timestamp);
-        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        return date.toLocaleDateString(this.uiLanguage, { month: 'short', day: 'numeric', year: 'numeric' });
     }
 
     formatTime(timestamp) {
         const date = new Date(timestamp);
-        return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+        return date.toLocaleTimeString(this.uiLanguage, { hour: '2-digit', minute: '2-digit' });
     }
 
     formatTimestamp(timestamp) {
         const date = new Date(timestamp);
-        return date.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        return date.toLocaleString(this.uiLanguage, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
     }
 
     getProfileNames() {
         return {
-            interview: 'Job Interview',
-            sales: 'Sales Call',
-            meeting: 'Business Meeting',
-            presentation: 'Presentation',
-            negotiation: 'Negotiation',
-            exam: 'Exam Assistant',
+            interview: this.t('Job Interview'),
+            sales: this.t('Sales Call'),
+            meeting: this.t('Business Meeting'),
+            presentation: this.t('Presentation'),
+            negotiation: this.t('Negotiation'),
+            exam: this.t('Exam Assistant'),
         };
     }
 
@@ -346,18 +347,18 @@ export class HistoryView extends LitElement {
             const names = this.getProfileNames();
             return names[session.profile] || session.profile;
         }
-        return 'Session';
+        return this.t('Session');
     }
 
     getSessionPreview(session) {
         const parts = [];
-        if (session.messageCount > 0) parts.push(`${session.messageCount} messages`);
-        if (session.screenAnalysisCount > 0) parts.push(`${session.screenAnalysisCount} screen`);
+        if (session.messageCount > 0) parts.push(`${session.messageCount} ${this.t('messages')}`);
+        if (session.screenAnalysisCount > 0) parts.push(`${session.screenAnalysisCount} ${this.t('screen')}`);
         if (session.profile) {
             const profileNames = this.getProfileNames();
             parts.push(profileNames[session.profile] || session.profile);
         }
-        return parts.length > 0 ? parts.join(' · ') : 'Empty session';
+        return parts.length > 0 ? parts.join(' · ') : this.t('Empty session');
     }
 
     getFilteredSessions() {
@@ -374,75 +375,98 @@ export class HistoryView extends LitElement {
         const messages = [];
         const history = session.conversationHistory || [];
         history.forEach(turn => {
-            if (turn.transcription) messages.push({ type: 'user', content: turn.transcription, timestamp: turn.timestamp });
+            if (turn.transcription) messages.push({ type: 'user', content: turn.transcription, source: turn.source, timestamp: turn.timestamp });
             if (turn.ai_response) messages.push({ type: 'ai', content: turn.ai_response, timestamp: turn.timestamp });
         });
         return messages;
     }
 
     renderTabContent() {
-        if (!this.selectedSession) return html`<div class="empty">Select a session.</div>`;
+        if (!this.selectedSession) return html`<div class="empty">${this.t('Select a session.')}</div>`;
 
         if (this.activeTab === 'conversation') {
             const messages = this.collectConversation(this.selectedSession);
-            if (!messages.length) return html`<div class="empty">No conversation data.</div>`;
-            return messages.map(msg => html`
-                <div class="message-row ${msg.type}">
-                    <div class="message">
-                        <div class="message-body">${msg.content}</div>
-                        <div class="message-meta">${this.formatTime(msg.timestamp)}</div>
+            if (!messages.length) return html`<div class="empty">${this.t('No conversation data.')}</div>`;
+            return messages.map(
+                msg => html`
+                    <div class="message-row ${msg.type}">
+                        <div class="message">
+                            <div class="message-meta">
+                                ${msg.type === 'ai' ? this.t('AI 回答') : this.t({ mic: '我 · 麦克风', system: '对方 · 系统声音', file: '导入音频', text: '文字提问', image: '截图提问' }[msg.source] || '提问（旧记录未标记来源）')}
+                            </div>
+                            <div class="message-body">${msg.content}</div>
+                            <div class="message-meta">${this.formatTime(msg.timestamp)}</div>
+                        </div>
                     </div>
-                </div>
-            `);
+                `
+            );
         }
 
         if (this.activeTab === 'screen') {
             const screen = this.selectedSession.screenAnalysisHistory || [];
-            if (!screen.length) return html`<div class="empty">No screen analysis data.</div>`;
-            return screen.map(entry => html`
-                <div class="message-row screen">
-                    <div class="message">
-                        <div class="message-body">${entry.response || ''}</div>
-                        <div class="message-meta">${this.formatTime(entry.timestamp)}</div>
+            if (!screen.length) return html`<div class="empty">${this.t('No screen analysis data.')}</div>`;
+            return screen.map(
+                entry => html`
+                    <div class="message-row screen">
+                        <div class="message">
+                            <div class="message-body">${entry.response || ''}</div>
+                            <div class="message-meta">${this.formatTime(entry.timestamp)}</div>
+                        </div>
                     </div>
-                </div>
-            `);
+                `
+            );
         }
 
         const profile = this.selectedSession.profile;
         const prompt = this.selectedSession.customPrompt;
-        if (!profile && !prompt) return html`<div class="empty">No context saved for this session.</div>`;
+        if (!profile && !prompt) return html`<div class="empty">${this.t('No context saved for this session.')}</div>`;
 
         return html`
-            ${profile ? html`
-                <div class="context-row">
-                    <span class="context-key">Profile</span>
-                    <span class="context-value">${this.getProfileNames()[profile] || profile}</span>
-                </div>
-            ` : ''}
-            ${prompt ? html`
-                <div class="context-row">
-                    <span class="context-key">Prompt</span>
-                    <span class="context-value">${prompt}</span>
-                </div>
-            ` : ''}
+            ${
+                profile
+                    ? html`
+                          <div class="context-row">
+                              <span class="context-key">${this.t('Profile')}</span>
+                              <span class="context-value">${this.getProfileNames()[profile] || profile}</span>
+                          </div>
+                      `
+                    : ''
+            }
+            ${
+                prompt
+                    ? html`
+                          <div class="context-row">
+                              <span class="context-key">${this.t('Prompt')}</span>
+                              <span class="context-value">${prompt}</span>
+                          </div>
+                      `
+                    : ''
+            }
         `;
     }
 
     renderListView() {
         const filteredSessions = this.getFilteredSessions();
         return html`
-            <div class="page-title">History</div>
+            <div class="page-title">${this.t('History')}</div>
 
             <div class="search-wrap">
-                <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <circle cx="11" cy="11" r="8"/>
-                    <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                <svg
+                    class="search-icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                >
+                    <circle cx="11" cy="11" r="8" />
+                    <line x1="21" y1="21" x2="16.65" y2="16.65" />
                 </svg>
                 <input
                     class="control"
                     type="text"
-                    placeholder="Search sessions..."
+                    placeholder=${this.t('Search sessions...')}
                     .value=${this.searchQuery}
                     @input=${this.handleSearchInput}
                 />
@@ -450,17 +474,25 @@ export class HistoryView extends LitElement {
 
             <section class="list-shell">
                 <div class="sessions-list">
-                    ${this.loading ? html`<div class="empty" style="margin:var(--space-md);">Loading sessions...</div>` : ''}
-                    ${!this.loading && filteredSessions.length === 0 ? html`<div class="empty" style="margin:var(--space-md);">No matching sessions.</div>` : ''}
-                    ${!this.loading ? filteredSessions.map(session => html`
-                        <button class="session-card" @click=${() => this.openSession(session.sessionId)}>
-                            <div class="session-left">
-                                <span class="session-profile">${this._getProfileLabel(session)}</span>
-                                <span class="session-date">${this.formatDate(session.createdAt)} · ${this.formatTime(session.createdAt)}</span>
-                            </div>
-                            ${session.messageCount > 0 ? html`<span class="session-badge">${session.messageCount}</span>` : ''}
-                        </button>
-                    `) : ''}
+                    ${this.loading ? html`<div class="empty" style="margin:var(--space-md);">${this.t('Loading sessions...')}</div>` : ''}
+                    ${!this.loading && filteredSessions.length === 0 ? html`<div class="empty" style="margin:var(--space-md);">${this.t('No matching sessions.')}</div>` : ''}
+                    ${
+                        !this.loading
+                            ? filteredSessions.map(
+                                  session => html`
+                                      <button class="session-card" @click=${() => this.openSession(session.sessionId)}>
+                                          <div class="session-left">
+                                              <span class="session-profile">${this._getProfileLabel(session)}</span>
+                                              <span class="session-date"
+                                                  >${this.formatDate(session.createdAt)} · ${this.formatTime(session.createdAt)}</span
+                                              >
+                                          </div>
+                                          ${session.messageCount > 0 ? html`<span class="session-badge">${session.messageCount}</span>` : ''}
+                                      </button>
+                                  `
+                              )
+                            : ''
+                    }
                 </div>
             </section>
         `;
@@ -471,38 +503,61 @@ export class HistoryView extends LitElement {
         const screenCount = this.selectedSession?.screenAnalysisHistory?.length || 0;
 
         return html`
-            <div class="page-title">Session Detail</div>
+            <div class="page-title">${this.t('Session Detail')}</div>
             <div class="detail-top">
                 <button class="back-btn" @click=${this.closeSession}>
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <polyline points="15 18 9 12 15 6"/>
+                    <svg
+                        width="20"
+                        height="20"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                    >
+                        <polyline points="15 18 9 12 15 6" />
                     </svg>
                 </button>
-                <span class="detail-info">${this._getProfileLabel(this.selectedSession)} · ${this.formatDate(this.selectedSession.createdAt)} · ${this.formatTime(this.selectedSession.createdAt)}</span>
+                <span class="detail-info"
+                    >${this._getProfileLabel(this.selectedSession)} · ${this.formatDate(this.selectedSession.createdAt)} ·
+                    ${this.formatTime(this.selectedSession.createdAt)}</span
+                >
             </div>
             <div class="tab-row">
-                <button class="tab-btn ${this.activeTab === 'conversation' ? 'active' : ''}" @click=${() => { this.activeTab = 'conversation'; }}>
-                    Conversation (${conversationCount})
+                <button
+                    class="tab-btn ${this.activeTab === 'conversation' ? 'active' : ''}"
+                    @click=${() => {
+                        this.activeTab = 'conversation';
+                    }}
+                >
+                    ${this.t('Conversation')} (${conversationCount})
                 </button>
-                <button class="tab-btn ${this.activeTab === 'screen' ? 'active' : ''}" @click=${() => { this.activeTab = 'screen'; }}>
-                    Screen (${screenCount})
+                <button
+                    class="tab-btn ${this.activeTab === 'screen' ? 'active' : ''}"
+                    @click=${() => {
+                        this.activeTab = 'screen';
+                    }}
+                >
+                    ${this.t('Screen')} (${screenCount})
                 </button>
-                <button class="tab-btn ${this.activeTab === 'context' ? 'active' : ''}" @click=${() => { this.activeTab = 'context'; }}>
-                    Context
+                <button
+                    class="tab-btn ${this.activeTab === 'context' ? 'active' : ''}"
+                    @click=${() => {
+                        this.activeTab = 'context';
+                    }}
+                >
+                    ${this.t('Context')}
                 </button>
             </div>
-            <section class="details-scroll">
-                ${this.renderTabContent()}
-            </section>
+            <section class="details-scroll">${this.renderTabContent()}</section>
         `;
     }
 
     render() {
         return html`
             <div class="unified-page">
-                <div class="unified-wrap">
-                    ${this.selectedSession ? this.renderDetailView() : this.renderListView()}
-                </div>
+                <div class="unified-wrap">${this.selectedSession ? this.renderDetailView() : this.renderListView()}</div>
             </div>
         `;
     }

@@ -167,6 +167,8 @@ async function initializeLocal(profile = 'interview') {
                   'initialize-subscription',
                   {
                       modelDirectory: prefs.voxtModelDirectory,
+                      asrLanguage: prefs.asrLanguage || 'auto',
+                      answerLanguage: prefs.selectedLanguage || 'cmn-CN',
                       asrExecutable: prefs.voxtAsrExecutable,
                       codexExecutable: prefs.codexExecutable || undefined,
                   },

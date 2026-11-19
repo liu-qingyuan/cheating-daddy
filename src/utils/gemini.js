@@ -102,7 +102,7 @@ function initializeNewSession(profile = null, customPrompt = null) {
     }
 }
 
-function saveConversationTurn(transcription, aiResponse) {
+function saveConversationTurn(transcription, aiResponse, source) {
     if (!currentSessionId) {
         initializeNewSession();
     }
@@ -111,6 +111,7 @@ function saveConversationTurn(transcription, aiResponse) {
         timestamp: Date.now(),
         transcription: transcription.trim(),
         ai_response: aiResponse.trim(),
+        ...(source ? { source } : {}),
     };
 
     conversationHistory.push(conversationTurn);
@@ -1089,6 +1090,11 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
         const success = await getLocalAi().initializeLocalSession(options, null, profile, customPrompt);
         if (!success) currentProviderMode = 'byok';
         return success;
+    });
+
+    ipcMain.handle('subscription-flush-audio', async () => {
+        if (currentProviderMode !== 'subscription') return { success: false, error: '请先启动订阅会话。' };
+        return getLocalAi().flushLocalAudio();
     });
 
     ipcMain.handle('subscription-transcribe-wav', async (event, data, ask = false) => {

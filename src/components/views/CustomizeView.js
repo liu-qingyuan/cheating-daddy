@@ -1,7 +1,8 @@
-import { html, css, LitElement } from '../../assets/lit-core-2.7.4.min.js';
+import { LocalizedElement, setInterfaceLanguage } from '../../utils/localized-element.js';
+import { html, css } from '../../assets/lit-core-2.7.4.min.js';
 import { unifiedPageStyles } from './sharedPageStyles.js';
 
-export class CustomizeView extends LitElement {
+export class CustomizeView extends LocalizedElement {
     static styles = [
         unifiedPageStyles,
         css`
@@ -185,6 +186,8 @@ export class CustomizeView extends LitElement {
         backgroundTransparency: { type: Number },
         fontSize: { type: Number },
         theme: { type: String },
+        asrLanguage: { state: true },
+        providerMode: { state: true },
         onProfileChange: { type: Function },
         onLanguageChange: { type: Function },
         onImageQualityChange: { type: Function },
@@ -198,7 +201,7 @@ export class CustomizeView extends LitElement {
     constructor() {
         super();
         this.selectedProfile = 'interview';
-        this.selectedLanguage = 'en-US';
+        this.selectedLanguage = 'cmn-CN';
         this.selectedImageQuality = 'medium';
         this.layoutMode = 'normal';
         this.keybinds = this.getDefaultKeybinds();
@@ -228,10 +231,13 @@ export class CustomizeView extends LitElement {
             const [prefs, keybinds] = await Promise.all([cheatingDaddy.storage.getPreferences(), cheatingDaddy.storage.getKeybinds()]);
             this.googleSearchEnabled = prefs.googleSearchEnabled ?? true;
             this.backgroundTransparency = prefs.backgroundTransparency ?? 0.8;
-            this.fontSize = prefs.fontSize ?? 20;
+            this.fontSize = Number.isFinite(Number(prefs.fontSize)) ? Number(prefs.fontSize) : 20;
             this.audioMode = prefs.audioMode ?? 'speaker_only';
             this.customPrompt = prefs.customPrompt ?? '';
             this.theme = prefs.theme ?? 'dark';
+            this.asrLanguage = prefs.asrLanguage || 'auto';
+            this.providerMode = prefs.providerMode;
+            this.audioMode = prefs.providerMode === 'subscription' ? prefs.subscriptionAudioMode || 'files_only' : prefs.audioMode || 'speaker_only';
             if (keybinds) {
                 this.keybinds = { ...this.getDefaultKeybinds(), ...keybinds };
             }
@@ -245,19 +251,19 @@ export class CustomizeView extends LitElement {
 
     getProfiles() {
         return [
-            { value: 'interview', name: 'Job Interview' },
-            { value: 'sales', name: 'Sales Call' },
-            { value: 'meeting', name: 'Business Meeting' },
-            { value: 'presentation', name: 'Presentation' },
-            { value: 'negotiation', name: 'Negotiation' },
-            { value: 'exam', name: 'Exam Assistant' },
+            { value: 'interview', name: this.t('Job Interview') },
+            { value: 'sales', name: this.t('Sales Call') },
+            { value: 'meeting', name: this.t('Business Meeting') },
+            { value: 'presentation', name: this.t('Presentation') },
+            { value: 'negotiation', name: this.t('Negotiation') },
+            { value: 'exam', name: this.t('Exam Assistant') },
         ];
     }
 
     getLanguages() {
         return [
-            { value: 'en-US', name: 'English (US)' },
-            { value: 'en-GB', name: 'English (UK)' },
+            { value: 'en-US', name: this.t('English (US)') },
+            { value: 'en-GB', name: this.t('English (UK)') },
             { value: 'en-AU', name: 'English (Australia)' },
             { value: 'en-IN', name: 'English (India)' },
             { value: 'de-DE', name: 'German (Germany)' },
@@ -282,7 +288,7 @@ export class CustomizeView extends LitElement {
             { value: 'te-IN', name: 'Telugu (India)' },
             { value: 'nl-NL', name: 'Dutch (Netherlands)' },
             { value: 'ko-KR', name: 'Korean (South Korea)' },
-            { value: 'cmn-CN', name: 'Mandarin Chinese (China)' },
+            { value: 'cmn-CN', name: this.t('Mandarin Chinese (China)') },
             { value: 'pl-PL', name: 'Polish (Poland)' },
             { value: 'ru-RU', name: 'Russian (Russia)' },
             { value: 'th-TH', name: 'Thai (Thailand)' },
@@ -308,17 +314,17 @@ export class CustomizeView extends LitElement {
 
     getKeybindActions() {
         return [
-            { key: 'moveUp', name: 'Move Window Up', description: 'Move the app window up' },
-            { key: 'moveDown', name: 'Move Window Down', description: 'Move the app window down' },
-            { key: 'moveLeft', name: 'Move Window Left', description: 'Move the app window left' },
-            { key: 'moveRight', name: 'Move Window Right', description: 'Move the app window right' },
-            { key: 'toggleVisibility', name: 'Toggle Visibility', description: 'Show or hide the app window' },
-            { key: 'toggleClickThrough', name: 'Toggle Click-through', description: 'Enable or disable click-through mode' },
-            { key: 'nextStep', name: 'Ask Next Step', description: 'Take screenshot and ask for next step' },
-            { key: 'previousResponse', name: 'Previous Response', description: 'Move to previous AI response' },
-            { key: 'nextResponse', name: 'Next Response', description: 'Move to next AI response' },
-            { key: 'scrollUp', name: 'Scroll Response Up', description: 'Scroll response content upward' },
-            { key: 'scrollDown', name: 'Scroll Response Down', description: 'Scroll response content downward' },
+            { key: 'moveUp', name: this.t('Move Window Up'), description: 'Move the app window up' },
+            { key: 'moveDown', name: this.t('Move Window Down'), description: 'Move the app window down' },
+            { key: 'moveLeft', name: this.t('Move Window Left'), description: 'Move the app window left' },
+            { key: 'moveRight', name: this.t('Move Window Right'), description: 'Move the app window right' },
+            { key: 'toggleVisibility', name: this.t('Toggle Visibility'), description: 'Show or hide the app window' },
+            { key: 'toggleClickThrough', name: this.t('Toggle Click-through'), description: 'Enable or disable click-through mode' },
+            { key: 'nextStep', name: this.t('Ask Next Step'), description: 'Take screenshot and ask for next step' },
+            { key: 'previousResponse', name: this.t('Previous Response'), description: 'Move to previous AI response' },
+            { key: 'nextResponse', name: this.t('Next Response'), description: 'Move to next AI response' },
+            { key: 'scrollUp', name: this.t('Scroll Response Up'), description: 'Scroll response content upward' },
+            { key: 'scrollDown', name: this.t('Scroll Response Down'), description: 'Scroll response content downward' },
         ];
     }
 
@@ -357,7 +363,7 @@ export class CustomizeView extends LitElement {
 
     async handleAudioModeSelect(e) {
         this.audioMode = e.target.value;
-        await cheatingDaddy.storage.updatePreference('audioMode', this.audioMode);
+        await cheatingDaddy.storage.updatePreference(this.providerMode === 'subscription' ? 'subscriptionAudioMode' : 'audioMode', this.audioMode);
         this.requestUpdate();
     }
 
@@ -482,7 +488,10 @@ export class CustomizeView extends LitElement {
             const defaults = {
                 customPrompt: '',
                 selectedProfile: 'interview',
-                selectedLanguage: 'en-US',
+                selectedLanguage: 'cmn-CN',
+                uiLanguage: 'zh-CN',
+                asrLanguage: 'auto',
+                subscriptionAudioMode: 'files_only',
                 selectedScreenshotInterval: '5',
                 selectedImageQuality: 'medium',
                 audioMode: 'speaker_only',
@@ -507,7 +516,9 @@ export class CustomizeView extends LitElement {
             this.selectedProfile = defaults.selectedProfile;
             this.selectedLanguage = defaults.selectedLanguage;
             this.selectedImageQuality = defaults.selectedImageQuality;
-            this.audioMode = defaults.audioMode;
+            this.audioMode = this.providerMode === 'subscription' ? defaults.subscriptionAudioMode : defaults.audioMode;
+            this.asrLanguage = defaults.asrLanguage;
+            setInterfaceLanguage(defaults.uiLanguage);
             this.fontSize = defaults.fontSize;
             this.backgroundTransparency = defaults.backgroundTransparency;
             this.googleSearchEnabled = defaults.googleSearchEnabled;
@@ -524,7 +535,7 @@ export class CustomizeView extends LitElement {
             this.updateFontSize();
             await cheatingDaddy.theme.save(defaults.theme);
 
-            this.clearStatusMessage = 'All settings restored to defaults';
+            this.clearStatusMessage = this.t('All settings restored to defaults');
             this.clearStatusType = 'success';
         } catch (error) {
             console.error('Error restoring settings:', error);
@@ -544,11 +555,11 @@ export class CustomizeView extends LitElement {
         this.requestUpdate();
         try {
             await cheatingDaddy.storage.clearAll();
-            this.clearStatusMessage = 'Successfully cleared all local data';
+            this.clearStatusMessage = this.t('Successfully cleared all local data');
             this.clearStatusType = 'success';
             this.requestUpdate();
             setTimeout(() => {
-                this.clearStatusMessage = 'Closing application...';
+                this.clearStatusMessage = this.t('Closing application...');
                 this.requestUpdate();
                 setTimeout(async () => {
                     if (window.require) {
@@ -570,25 +581,34 @@ export class CustomizeView extends LitElement {
     renderAudioSection() {
         return html`
             <section class="surface">
-                <div class="surface-title">Audio Input</div>
+                <div class="surface-title">${this.t('Audio Input')}</div>
                 <div class="form-grid">
                     <div class="form-group">
-                        <label class="form-label">Audio Mode</label>
-                        <select class="control" .value=${this.audioMode} @change=${this.handleAudioModeSelect}>
-                            <option value="speaker_only">Speaker Only (Interviewer)</option>
-                            <option value="mic_only">Microphone Only (Me)</option>
-                            <option value="both">Both Speaker and Microphone</option>
+                        <label class="form-label">${this.t('Audio Mode')}</label>
+                        <select id="audioMode" class="control" .value=${this.audioMode} @change=${this.handleAudioModeSelect}>
+                            ${this.providerMode === 'subscription' ? html`<option value="files_only" .selected=${this.audioMode === 'files_only'}>${this.t('Files only (microphone off)')}</option>` : ''}
+                            <option value="speaker_only" .selected=${this.audioMode === 'speaker_only'}>
+                                ${this.t('Speaker Only (Interviewer)')}
+                            </option>
+                            <option value="mic_only" .selected=${this.audioMode === 'mic_only'}>${this.t('Microphone Only (Me)')}</option>
+                            <option value="both" .selected=${this.audioMode === 'both'}>${this.t('Both Speaker and Microphone')}</option>
                         </select>
                     </div>
-                    ${this.audioMode !== 'speaker_only' ? html`
-                        <div class="warning-callout">May cause unexpected behavior. Only change this if you know what you're doing.</div>
-                    ` : ''}
+                    ${
+                        this.audioMode !== 'speaker_only'
+                            ? html`
+                                  <div class="warning-callout">
+                                      ${this.t('Sources label microphone as me and system audio as the other side. This is not voice identification. Use headphones to avoid cross-talk.')}
+                                  </div>
+                              `
+                            : ''
+                    }
                     <div class="form-group">
-                        <label class="form-label">Image Quality</label>
+                        <label class="form-label">${this.t('Image Quality')}</label>
                         <select class="control" .value=${this.selectedImageQuality} @change=${this.handleImageQualitySelect}>
-                            <option value="high">High Quality</option>
-                            <option value="medium">Medium Quality</option>
-                            <option value="low">Low Quality</option>
+                            <option value="high">${this.t('High Quality')}</option>
+                            <option value="medium">${this.t('Medium Quality')}</option>
+                            <option value="low">${this.t('Low Quality')}</option>
                         </select>
                     </div>
                 </div>
@@ -596,17 +616,54 @@ export class CustomizeView extends LitElement {
         `;
     }
 
+    async handleInterfaceLanguage(e) {
+        const value = e.target.value;
+        const saved = await cheatingDaddy.storage.updatePreference('uiLanguage', value);
+        if (saved === false) throw new Error('无法保存界面语言');
+        setInterfaceLanguage(value);
+    }
+
+    async handleAsrLanguage(e) {
+        this.asrLanguage = e.target.value;
+        await cheatingDaddy.storage.updatePreference('asrLanguage', this.asrLanguage);
+    }
+
     renderLanguageSection() {
         return html`
             <section class="surface">
-                <div class="surface-title">Language</div>
+                <div class="surface-title">${this.t('Language')}</div>
                 <div class="form-grid">
                     <div class="form-group">
-                        <label class="form-label">Speech Language</label>
-                        <select class="control" .value=${this.selectedLanguage} @change=${this.handleLanguageSelect}>
-                            ${this.getLanguages().map(language => html`<option value=${language.value}>${language.name}</option>`)}
+                        <label class="form-label" for="uiLanguage">${this.t('Interface language')}</label>
+                        <select id="uiLanguage" class="control" @change=${this.handleInterfaceLanguage}>
+                            <option value="zh-CN" .selected=${this.uiLanguage === 'zh-CN'}>${this.t('简体中文')}</option>
+                            <option value="en" .selected=${this.uiLanguage === 'en'}>English</option>
                         </select>
                     </div>
+                    <div class="form-group">
+                        <label class="form-label" for="answerLanguage">${this.t('Answer language')}</label>
+                        <select id="answerLanguage" class="control" @change=${this.handleLanguageSelect}>
+                            <option value="auto" .selected=${this.selectedLanguage === 'auto'}>${this.t('Follow the question language')}</option>
+                            ${this.getLanguages().map(language => html`<option value=${language.value} .selected=${this.selectedLanguage === language.value}>${this.t(language.name)}</option>`)}
+                        </select>
+                    </div>
+                    ${
+                        this.providerMode === 'subscription'
+                            ? html`<div class="form-group">
+                                  <label class="form-label" for="asrLanguage">${this.t('Speech recognition language')}</label>
+                                  <select id="asrLanguage" class="control" @change=${this.handleAsrLanguage}>
+                                      <option value="auto" .selected=${this.asrLanguage === 'auto'}>
+                                          ${this.t('Auto detect Chinese / English')}
+                                      </option>
+                                      <option value="Chinese" .selected=${this.asrLanguage === 'Chinese'}>${this.t('中文')}</option>
+                                      <option value="English" .selected=${this.asrLanguage === 'English'}>English</option>
+                                  </select>
+                              </div>`
+                            : ''
+                    }
+                    <p>
+                        ${this.t('Saved automatically. Interface language changes immediately; answer, speech and input settings apply to the next session.')}
+                    </p>
                 </div>
             </section>
         `;
@@ -615,17 +672,17 @@ export class CustomizeView extends LitElement {
     renderAppearanceSection() {
         return html`
             <section class="surface">
-                <div class="surface-title">Appearance</div>
+                <div class="surface-title">${this.t('Appearance')}</div>
                 <div class="form-grid">
                     <div class="form-group">
-                        <label class="form-label">Theme</label>
+                        <label class="form-label">${this.t('Theme')}</label>
                         <select class="control" .value=${this.theme} @change=${this.handleThemeChange}>
-                            ${this.getThemes().map(theme => html`<option value=${theme.value}>${theme.name}</option>`)}
+                            ${this.getThemes().map(theme => html`<option value=${theme.value}>${this.t(theme.name)}</option>`)}
                         </select>
                     </div>
                     <div class="form-group slider-wrap">
                         <div class="slider-header">
-                            <label class="form-label">Background Transparency</label>
+                            <label class="form-label">${this.t('Background Transparency')}</label>
                             <span class="slider-value">${Math.round(this.backgroundTransparency * 100)}%</span>
                         </div>
                         <input
@@ -640,7 +697,7 @@ export class CustomizeView extends LitElement {
                     </div>
                     <div class="form-group slider-wrap">
                         <div class="slider-header">
-                            <label class="form-label">Response Font Size</label>
+                            <label class="form-label">${this.t('Response Font Size')}</label>
                             <span class="slider-value">${this.fontSize}px</span>
                         </div>
                         <input
@@ -661,23 +718,25 @@ export class CustomizeView extends LitElement {
     renderKeyboardSection() {
         return html`
             <section class="surface">
-                <div class="surface-title">Keyboard Shortcuts</div>
-                ${this.getKeybindActions().map(action => html`
-                    <div class="keybind-row">
-                        <span class="keybind-name">${action.name}</span>
-                        <input
-                            type="text"
-                            class="control keybind-input"
-                            .value=${this.keybinds[action.key]}
-                            data-action=${action.key}
-                            @keydown=${this.handleKeybindInput}
-                            @focus=${this.handleKeybindFocus}
-                            readonly
-                        />
-                    </div>
-                `)}
+                <div class="surface-title">${this.t('Keyboard Shortcuts')}</div>
+                ${this.getKeybindActions().map(
+                    action => html`
+                        <div class="keybind-row">
+                            <span class="keybind-name">${action.name}</span>
+                            <input
+                                type="text"
+                                class="control keybind-input"
+                                .value=${this.keybinds[action.key]}
+                                data-action=${action.key}
+                                @keydown=${this.handleKeybindInput}
+                                @focus=${this.handleKeybindFocus}
+                                readonly
+                            />
+                        </div>
+                    `
+                )}
                 <div style="margin-top: var(--space-sm);">
-                    <button class="control" style="width:auto;padding:8px 10px;" @click=${this.resetKeybinds}>Reset to defaults</button>
+                    <button class="control" style="width:auto;padding:8px 10px;" @click=${this.resetKeybinds}>${this.t('Reset to defaults')}</button>
                 </div>
             </section>
         `;
@@ -686,18 +745,20 @@ export class CustomizeView extends LitElement {
     renderPrivacySection() {
         return html`
             <section class="surface danger-surface">
-                <div class="surface-title danger">Privacy and Data</div>
+                <div class="surface-title danger">${this.t('Privacy and Data')}</div>
                 <div style="display:flex;gap:var(--space-sm);flex-wrap:wrap;">
                     <button class="danger-button" @click=${this.restoreAllSettings} ?disabled=${this.isRestoring}>
-                        ${this.isRestoring ? 'Restoring...' : 'Restore all settings'}
+                        ${this.isRestoring ? this.t('Restoring...') : this.t('Restore all settings')}
                     </button>
                     <button class="danger-button" @click=${this.clearLocalData} ?disabled=${this.isClearing}>
-                        ${this.isClearing ? 'Clearing...' : 'Delete all data'}
+                        ${this.isClearing ? this.t('Clearing...') : this.t('Delete all data')}
                     </button>
                 </div>
-                ${this.clearStatusMessage ? html`
-                    <div class="status ${this.clearStatusType === 'success' ? 'success' : 'error'}">${this.clearStatusMessage}</div>
-                ` : ''}
+                ${
+                    this.clearStatusMessage
+                        ? html` <div class="status ${this.clearStatusType === 'success' ? 'success' : 'error'}">${this.clearStatusMessage}</div> `
+                        : ''
+                }
             </section>
         `;
     }
@@ -706,11 +767,8 @@ export class CustomizeView extends LitElement {
         return html`
             <div class="unified-page">
                 <div class="unified-wrap">
-                    <div class="page-title">Settings</div>
-                    ${this.renderAudioSection()}
-                    ${this.renderLanguageSection()}
-                    ${this.renderAppearanceSection()}
-                    ${this.renderKeyboardSection()}
+                    <div class="page-title">${this.t('Settings')}</div>
+                    ${this.renderAudioSection()} ${this.renderLanguageSection()} ${this.renderAppearanceSection()} ${this.renderKeyboardSection()}
                     ${this.renderPrivacySection()}
                 </div>
             </div>
