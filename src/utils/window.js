@@ -109,6 +109,10 @@ function getDefaultKeybinds() {
         toggleVisibility: isMac ? 'Cmd+\\' : 'Ctrl+\\',
         toggleClickThrough: isMac ? 'Cmd+M' : 'Ctrl+M',
         nextStep: isMac ? 'Cmd+Enter' : 'Ctrl+Enter',
+        toggleSessionHistory: isMac ? 'Cmd+Shift+H' : 'Ctrl+Shift+H',
+        resumeLatest: isMac ? 'Cmd+Shift+L' : 'Ctrl+Shift+L',
+        scrollInputsUp: isMac ? 'Cmd+Alt+Up' : 'Ctrl+Alt+Up',
+        scrollInputsDown: isMac ? 'Cmd+Alt+Down' : 'Ctrl+Alt+Down',
         previousResponse: isMac ? 'Cmd+[' : 'Ctrl+[',
         nextResponse: isMac ? 'Cmd+]' : 'Ctrl+]',
         scrollUp: isMac ? 'Cmd+Shift+Up' : 'Ctrl+Shift+Up',
@@ -220,6 +224,18 @@ function updateGlobalShortcuts(keybinds, mainWindow, sendToRenderer, geminiSessi
         } catch (error) {
             console.error(`Failed to register nextStep (${keybinds.nextStep}):`, error);
         }
+    }
+
+    const viewingActions = {
+        toggleSessionHistory: 'toggle-session-history',
+        resumeLatest: 'resume-latest-response',
+        scrollInputsUp: 'scroll-inputs-up',
+        scrollInputsDown: 'scroll-inputs-down',
+    };
+    for (const [action, channel] of Object.entries(viewingActions)) {
+        const key = keybinds[action];
+        if (key && !globalShortcut.register(key, () => sendToRenderer(channel)))
+            sendToRenderer('update-status', `快捷键 ${key} 被占用，请在设置中更换。`);
     }
 
     // Register previous response shortcut

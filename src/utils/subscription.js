@@ -80,6 +80,7 @@ async function answer(current, text, image, source = 'text') {
     sendToRenderer('update-status', 'GPT 订阅正在解题…');
     const result = await current.answer(text, { image, instructions });
     if (engine !== current) return { success: false, error: '会话已关闭。' };
+    sendToRenderer('subscription-answer-context', { source, question: text });
     sendToRenderer('new-response', result);
     saveConversationTurn(text, result, source);
     sendToRenderer('update-status', '本地 ASR + GPT 订阅已就绪');
@@ -87,7 +88,10 @@ async function answer(current, text, image, source = 'text') {
 }
 
 function sendLocalText(text) {
-    return enqueue(current => answer(current, text));
+    return enqueue(current => {
+        sendToRenderer('subscription-transcript', { text, source: 'text' });
+        return answer(current, text);
+    });
 }
 
 function sendLocalImage(data, prompt) {

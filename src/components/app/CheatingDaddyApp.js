@@ -391,6 +391,8 @@ export class CheatingDaddyApp extends LocalizedElement {
         _localAiDownloadProgress: { state: true },
         _lastTranscript: { state: true },
         _transcripts: { state: true },
+        _responseContexts: { state: true },
+        _followLatest: { state: true },
         _audioLevels: { state: true },
         _microphoneCapture: { state: true },
         _activeInputMode: { state: true },
@@ -414,6 +416,9 @@ export class CheatingDaddyApp extends LocalizedElement {
         this.responses = [];
         this._lastTranscript = '';
         this._transcripts = [];
+        this._responseContexts = [];
+        this._pendingResponseContext = null;
+        this._followLatest = true;
         this._audioLevels = {};
         this._microphoneCapture = null;
         this._sessionInitializing = false;
@@ -488,6 +493,9 @@ export class CheatingDaddyApp extends LocalizedElement {
         window.addEventListener('microphone-capture-state', this._onMicrophoneCapture);
         if (window.require) {
             const { ipcRenderer } = window.require('electron');
+            ipcRenderer.on('subscription-answer-context', (_, context) => {
+                this._pendingResponseContext = context;
+            });
             ipcRenderer.on('new-response', (_, response) => this.addNewResponse(response));
             ipcRenderer.on('session-initializing', (_, value) => {
                 this._sessionInitializing = value;
@@ -526,6 +534,7 @@ export class CheatingDaddyApp extends LocalizedElement {
             ipcRenderer.removeAllListeners('new-response');
             ipcRenderer.removeAllListeners('update-response');
             ipcRenderer.removeAllListeners('subscription-transcript');
+            ipcRenderer.removeAllListeners('subscription-answer-context');
             ipcRenderer.removeAllListeners('subscription-audio-level');
             ipcRenderer.removeAllListeners('session-initializing');
             ipcRenderer.removeAllListeners('update-status');
@@ -573,9 +582,10 @@ export class CheatingDaddyApp extends LocalizedElement {
     }
 
     addNewResponse(response) {
-        const wasOnLatest = this.currentResponseIndex === this.responses.length - 1;
         this.responses = [...this.responses, response];
-        if (wasOnLatest || this.currentResponseIndex === -1) {
+        this._responseContexts = [...this._responseContexts, this._pendingResponseContext || null];
+        this._pendingResponseContext = null;
+        if (this._followLatest || this.currentResponseIndex === -1) {
             this.currentResponseIndex = this.responses.length - 1;
         }
         this._awaitingNewResponse = false;
@@ -694,6 +704,9 @@ export class CheatingDaddyApp extends LocalizedElement {
         this.responses = [];
         this._lastTranscript = '';
         this._transcripts = [];
+        this._responseContexts = [];
+        this._pendingResponseContext = null;
+        this._followLatest = true;
         this._audioLevels = {};
         this._activeInputMode = providerMode === 'subscription' ? prefs.subscriptionAudioMode || 'files_only' : null;
         this._answerLanguage = prefs.selectedLanguage || 'cmn-CN';
@@ -856,6 +869,11 @@ export class CheatingDaddyApp extends LocalizedElement {
                     <assistant-view
                         .transcript=${this._lastTranscript}
                         .transcripts=${this._transcripts}
+                        .responseContexts=${this._responseContexts}
+                        .followLatest=${this._followLatest}
+                        @follow-latest-changed=${event => {
+                            this._followLatest = event.detail.value;
+                        }}
                         .audioLevels=${this._audioLevels}
                         .microphoneCapture=${this._microphoneCapture}
                         .inputMode=${this._activeInputMode}

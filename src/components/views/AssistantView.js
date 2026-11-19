@@ -23,7 +23,7 @@ export class AssistantView extends LocalizedElement {
             line-height: var(--line-height);
             background: var(--bg-app);
             padding: var(--space-sm) var(--space-md);
-            scroll-behavior: smooth;
+            scroll-behavior: auto;
             user-select: text;
             cursor: text;
             color: var(--text-primary);
@@ -317,6 +317,10 @@ export class AssistantView extends LocalizedElement {
         responses: { type: Array },
         transcript: { type: String },
         transcripts: { type: Array },
+        responseContexts: { type: Array },
+        followLatest: { type: Boolean },
+        showHistory: { state: true },
+        navigationKeys: { state: true },
         audioLevels: { type: Object },
         microphoneCapture: { type: Object },
         isReconnectingMicrophone: { state: true },
@@ -336,6 +340,26 @@ export class AssistantView extends LocalizedElement {
         this.responses = [];
         this.transcript = '';
         this.transcripts = [];
+        this.responseContexts = [];
+        this.followLatest = true;
+        this.showHistory = false;
+        const mod = cheatingDaddy.isMacOS ? 'Cmd' : 'Ctrl';
+        this.navigationKeys = {
+            toggleSessionHistory: mod + '+Shift+H',
+            resumeLatest: mod + '+Shift+L',
+            scrollInputsUp: mod + '+Alt+Up',
+            scrollInputsDown: mod + '+Alt+Down',
+            scrollUp: mod + '+Shift+Up',
+            scrollDown: mod + '+Shift+Down',
+            previousResponse: mod + '+[',
+            nextResponse: mod + '+]',
+        };
+        cheatingDaddy.storage
+            .getKeybinds()
+            .then(saved => {
+                if (saved) this.navigationKeys = { ...this.navigationKeys, ...saved };
+            })
+            .catch(error => console.warn('Navigation shortcuts:', error.message));
         this.audioLevels = {};
         this.isSubmittingSpeech = false;
         this.isReconnectingMicrophone = false;
@@ -411,6 +435,8 @@ export class AssistantView extends LocalizedElement {
     }
 
     navigateToPreviousResponse() {
+        this.showHistory = false;
+        this.setFollowLatest(false);
         if (this.currentResponseIndex > 0) {
             this.currentResponseIndex--;
             this.dispatchEvent(
@@ -423,8 +449,10 @@ export class AssistantView extends LocalizedElement {
     }
 
     navigateToNextResponse() {
+        this.showHistory = false;
         if (this.currentResponseIndex < this.responses.length - 1) {
             this.currentResponseIndex++;
+            this.setFollowLatest(this.currentResponseIndex === this.responses.length - 1);
             this.dispatchEvent(
                 new CustomEvent('response-index-changed', {
                     detail: { index: this.currentResponseIndex },
@@ -434,20 +462,61 @@ export class AssistantView extends LocalizedElement {
         }
     }
 
+    setFollowLatest(value) {
+        this.followLatest = value;
+        this.dispatchEvent(new CustomEvent('follow-latest-changed', { detail: { value } }));
+    }
+
+    handleAnswerScroll(event) {
+        if (this.showHistory) return;
+        const target = event.currentTarget;
+        this.setFollowLatest(target.scrollTop + target.clientHeight >= target.scrollHeight - 32);
+    }
+
+    handleInputScroll(event) {
+        const target = event.currentTarget;
+        if (target.scrollTop + target.clientHeight < target.scrollHeight - 32) this.setFollowLatest(false);
+    }
+
+    toggleSessionHistory() {
+        this.showHistory = !this.showHistory;
+        if (this.showHistory) this.setFollowLatest(false);
+    }
+
+    resumeLatest() {
+        this.showHistory = false;
+        this.setFollowLatest(true);
+        this.currentResponseIndex = this.responses.length - 1;
+        this.dispatchEvent(new CustomEvent('response-index-changed', { detail: { index: this.currentResponseIndex } }));
+        this.updateComplete.then(() => this.updateResponseContent());
+    }
+
     scrollResponseUp() {
-        const container = this.shadowRoot.querySelector('.response-container');
-        if (container) {
-            const scrollAmount = container.clientHeight * 0.3;
-            container.scrollTop = Math.max(0, container.scrollTop - scrollAmount);
-        }
+        this.setFollowLatest(false);
+        const container = this.shadowRoot.querySelector(this.showHistory ? '#sessionHistory' : '#responseContainer');
+        if (container) container.scrollTop = Math.max(0, container.scrollTop - container.clientHeight * 0.85);
     }
 
     scrollResponseDown() {
-        const container = this.shadowRoot.querySelector('.response-container');
+        const container = this.shadowRoot.querySelector(this.showHistory ? '#sessionHistory' : '#responseContainer');
         if (container) {
-            const scrollAmount = container.clientHeight * 0.3;
-            container.scrollTop = Math.min(container.scrollHeight - container.clientHeight, container.scrollTop + scrollAmount);
+            container.scrollTop = Math.min(container.scrollHeight, container.scrollTop + container.clientHeight * 0.85);
+            if (!this.showHistory) this.setFollowLatest(container.scrollTop + container.clientHeight >= container.scrollHeight - 32);
         }
+    }
+
+    scrollInputs(direction) {
+        this.setFollowLatest(false);
+        this.shadowRoot.querySelectorAll('.source-messages').forEach(element => {
+            element.scrollTop += direction * element.clientHeight * 0.85;
+        });
+    }
+
+    sourceName(source) {
+        return this.t(
+            { mic: '我 · 麦克风', system: '面试官 · 系统声音', text: '我 · 文字输入', file: '我 · 导入音频', image: '我 · 截图提问' }[source] ||
+                '来源未记录'
+        );
     }
 
     connectedCallback() {
@@ -465,6 +534,13 @@ export class AssistantView extends LocalizedElement {
             ipcRenderer.on('navigate-next-response', this.handleNextResponse);
             ipcRenderer.on('scroll-response-up', this.handleScrollUp);
             ipcRenderer.on('scroll-response-down', this.handleScrollDown);
+            this._navigationHandlers = {
+                'toggle-session-history': () => this.toggleSessionHistory(),
+                'resume-latest-response': () => this.resumeLatest(),
+                'scroll-inputs-up': () => this.scrollInputs(-1),
+                'scroll-inputs-down': () => this.scrollInputs(1),
+            };
+            for (const [channel, handler] of Object.entries(this._navigationHandlers)) ipcRenderer.on(channel, handler);
         }
     }
 
@@ -478,6 +554,7 @@ export class AssistantView extends LocalizedElement {
             if (this.handleNextResponse) ipcRenderer.removeListener('navigate-next-response', this.handleNextResponse);
             if (this.handleScrollUp) ipcRenderer.removeListener('scroll-response-up', this.handleScrollUp);
             if (this.handleScrollDown) ipcRenderer.removeListener('scroll-response-down', this.handleScrollDown);
+            for (const [channel, handler] of Object.entries(this._navigationHandlers || {})) ipcRenderer.removeListener(channel, handler);
         }
     }
 
@@ -665,6 +742,10 @@ export class AssistantView extends LocalizedElement {
 
     updated(changedProperties) {
         super.updated(changedProperties);
+        if (changedProperties.has('transcripts') && this.followLatest)
+            this.shadowRoot.querySelectorAll('.source-messages').forEach(element => {
+                element.scrollTop = element.scrollHeight;
+            });
         if (changedProperties.has('responses') || changedProperties.has('currentResponseIndex') || changedProperties.has('uiLanguage')) {
             this.updateResponseContent();
         }
@@ -690,6 +771,7 @@ export class AssistantView extends LocalizedElement {
             const currentResponse = this.getCurrentResponse();
             const renderedResponse = this.renderMarkdown(currentResponse);
             container.innerHTML = renderedResponse;
+            if (this.followLatest && !this.showHistory) container.scrollTop = container.scrollHeight;
             if (this.shouldAnimateResponse) {
                 this.dispatchEvent(new CustomEvent('response-animation-complete', { bubbles: true, composed: true }));
             }
@@ -748,81 +830,53 @@ export class AssistantView extends LocalizedElement {
 
     renderSpeechPanel() {
         if (!this.inputMode) return '';
-        const labels = {
-            mic_only: this.t('麦克风（我 / 自测提问）'),
-            speaker_only: this.t('系统声音（对方 / 面试官）'),
-            both: this.t('麦克风与系统声音（分别标记来源）'),
-            files_only: this.t('仅导入文件（不开麦克风）'),
-        };
-        const sourceLabels = { mic: '我 · 麦克风', system: '对方 · 系统声音', file: '导入音频' };
-        const language =
-            this.answerLanguage === 'cmn-CN' || this.answerLanguage === 'zh-CN'
-                ? '简体中文'
-                : this.answerLanguage === 'auto'
-                  ? this.t('跟随题目语言')
-                  : this.answerLanguage;
+        const own = this.transcripts.filter(item => item.source !== 'system');
+        const other = this.transcripts.filter(item => item.source === 'system');
+        const hasSystem = ['both', 'speaker_only'].includes(this.inputMode);
         return html`<section
             id="speechPanel"
-            style="padding:12px 16px;color:var(--text-primary);border-bottom:1px solid var(--border-color);max-height:40vh;overflow:auto;flex-shrink:0"
+            style="padding:8px 16px;color:var(--text-primary);border-bottom:1px solid var(--border-color);flex-shrink:0;max-height:40vh;overflow:auto"
         >
-            <div>${this.t('输入来源')}：${this.t(labels[this.inputMode] || this.inputMode)}</div>
-            <div>
-                ${this.t('Answer language')}：${this.t(language)} ·
-                ${this.t('Speech recognition language')}：${this.t(this.asrLanguage === 'auto' ? '自动识别中英文' : this.asrLanguage === 'Chinese' ? '中文' : 'English')}
+            <div id="automaticRecordingState">
+                ${this.t('自动录音')}：${this.t(this.inputMode === 'files_only' ? '当前未开启麦克风' : this.microphoneCapture?.state === 'running' ? '录音中，停顿后自动转写' : '等待麦克风采集')}
             </div>
-            ${
-                ['mic_only', 'both'].includes(this.inputMode)
-                    ? html`
-                          <div id="microphoneCaptureStatus" role="status">
-                              ${this.t('实际麦克风')}：${this.microphoneCapture?.deviceLabel || this.t('等待采集')} ·
-                              ${this.t({ starting: '等待音频回调', running: '正在接收音频', stalled: '音频采集中断', error: '采集失败', stopped: '采集已停止' }[this.microphoneCapture?.state] || '等待采集')}
-                          </div>
-                          <div id="automaticRecordingState">
-                              ${this.t('自动录音')}：${this.t(this.microphoneCapture?.state === 'running' ? '录音中，停顿后自动转写' : '等待麦克风采集')}
-                          </div>
-                          <details id="microphoneDiagnostics">
-                              <summary>${this.t('采集诊断（仅数值，不保存音频）')}</summary>
-                              <div id="microphoneNumericLevel">
-                                  RMS ${(this.microphoneCapture?.rms || 0).toFixed(6)} · ${this.t('峰值')}
-                                  ${(this.microphoneCapture?.peakRms || 0).toFixed(6)} · ${this.t('音频帧')} ${this.microphoneCapture?.frames || 0} ·
-                                  ${this.t('处理模式')} ${this.microphoneCapture?.processing || '—'}
-                              </div>
-                          </details>
-                          <button id="reconnectMicrophone" @click=${this.handleReconnectMicrophone} ?disabled=${this.isReconnectingMicrophone}>
-                              ${this.t(this.isReconnectingMicrophone ? '正在重连…' : '重连麦克风')}
-                          </button>
-                      `
-                    : ''
-            }
-            ${
-                this.inputMode !== 'files_only'
-                    ? html`
-                          <div>
-                              ${this.t('按声音来源标记，不是声纹识人；同一麦克风录到两个人时无法自动区分。自测请选麦克风，双方通话建议戴耳机。')}
-                          </div>
-                          ${['mic', 'system']
-                              .filter(source => this.inputMode === 'both' || this.inputMode === (source === 'mic' ? 'mic_only' : 'speaker_only'))
-                              .map(
-                                  source =>
-                                      html` <label style="display:block"
-                                          >${this.t(sourceLabels[source])} · ${this.t('输入电平')}
-                                          <meter
-                                              min="0"
-                                              max="0.06"
-                                              .value=${this.audioLevels[source] || 0}
-                                              aria-label=${this.t(sourceLabels[source])}
-                                          ></meter>
-                                      </label>`
-                              )}
-                          <button id="submitSpeech" @click=${this.handleSubmitSpeech} ?disabled=${this.isSubmittingSpeech}>
-                              ${this.t(this.isSubmittingSpeech ? '识别并回答中…' : '提交刚才语音')}
-                          </button>
-                          <div>${this.t('说完停顿约 1 秒会自动提交；一直有背景声时可手动提交。电平不动请检查音源和麦克风权限。')}</div>
-                      `
-                    : html`<div>${this.t('当前未开启麦克风；直接说话不会触发回答。请结束会话，在首页改选麦克风后重新开始。')}</div>`
-            }
-            <div style="margin-top:8px">${this.t('语音提问记录')}：</div>
-            ${this.transcripts.length ? this.transcripts.map(item => html`<div class="speech-turn" style="padding:5px 0"><strong>${this.t(sourceLabels[item.source] || '导入音频')}：</strong>${item.text}</div>`) : html`<div>${this.t('还没有转写结果。输入电平表示收到声音，不代表已识别成文字。')}</div>`}
+            <div class="input-columns" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:8px 0">
+                <section id="selfTranscriptPanel" style="border-left:3px solid #60a5fa;padding:4px 8px;background:var(--bg-surface)">
+                    <strong>${this.t('我 · 麦克风 / 文字输入')}</strong>
+                    <div class="source-messages" style="max-height:110px;overflow:auto" @scroll=${this.handleInputScroll}>
+                        ${
+                            own.length
+                                ? own.map(
+                                      item =>
+                                          html`<div class="speech-turn" style="padding:5px 0">
+                                              <small>${this.sourceName(item.source)}</small>
+                                              <div>${item.text}</div>
+                                          </div>`
+                                  )
+                                : html`<div>${this.t('等待我的输入…')}</div>`
+                        }
+                    </div>
+                </section>
+                <section id="interviewerTranscriptPanel" style="border-left:3px solid #fbbf24;padding:4px 8px;background:var(--bg-surface)">
+                    <strong>${this.t('面试官 · 系统声音')}</strong>
+                    <div class="source-messages" style="max-height:110px;overflow:auto" @scroll=${this.handleInputScroll}>
+                        ${other.length ? other.map(item => html`<div class="speech-turn" style="padding:5px 0">${item.text}</div>`) : html`<div>${this.t(hasSystem ? '等待对方的系统声音…' : '未开启系统声音；通话时请在首页选择麦克风与系统声音。')}</div>`}
+                    </div>
+                </section>
+            </div>
+            <details>
+                <summary>${this.t('输入来源与采集诊断')}</summary>
+                <div>${this.t('按声音来源标记，不是声纹识人；同一麦克风录到两个人时无法自动区分。自测请选麦克风，双方通话建议戴耳机。')}</div>
+                <div id="microphoneCaptureStatus">
+                    ${this.t('实际麦克风')}：${this.microphoneCapture?.deviceLabel || '—'} · ${this.t(this.microphoneCapture?.state || '等待采集')}
+                </div>
+                <meter min="0" max="0.06" .value=${this.audioLevels?.mic || 0}></meter>
+                <div id="microphoneNumericLevel">
+                    RMS ${(this.microphoneCapture?.rms || 0).toFixed(6)} · ${this.t('峰值')} ${(this.microphoneCapture?.peakRms || 0).toFixed(6)} ·
+                    ${this.t('音频帧')} ${this.microphoneCapture?.frames || 0}
+                </div>
+                ${['mic_only', 'both'].includes(this.inputMode) ? html`<button id="reconnectMicrophone" @click=${this.handleReconnectMicrophone} ?disabled=${this.isReconnectingMicrophone}>${this.t('重连麦克风')}</button><button id="submitSpeech" @click=${this.handleSubmitSpeech} ?disabled=${this.isSubmittingSpeech}>${this.t('提交刚才语音')}</button>` : ''}
+            </details>
         </section>`;
     }
 
@@ -831,9 +885,49 @@ export class AssistantView extends LocalizedElement {
 
         return html`
             ${this.renderSpeechPanel()}
-            <div style="padding:6px 16px;color:var(--text-primary)">${this.t('AI 回答')}</div>
-            <div class="response-container" id="responseContainer"></div>
-
+            <div style="padding:6px 16px;color:var(--text-primary);display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+                <button id="toggleSessionHistory" @click=${this.toggleSessionHistory}>
+                    ${this.t(this.showHistory ? '返回单条回答' : '当前会话历史')} · ${this.navigationKeys.toggleSessionHistory}
+                </button>
+                <button id="resumeLatest" @click=${this.resumeLatest}>
+                    ${this.t(this.followLatest ? '正在跟随最新消息' : '回到最新并自动跟随')} · ${this.navigationKeys.resumeLatest}
+                </button>
+                <small
+                    >${this.t('翻页')} ${this.navigationKeys.scrollUp} / ${this.navigationKeys.scrollDown} · ${this.t('切换回答')}
+                    ${this.navigationKeys.previousResponse} / ${this.navigationKeys.nextResponse}</small
+                >
+            </div>
+            <div id="answerSource" style="padding:6px 16px;color:var(--text-primary);border-left:3px solid #34d399">
+                <strong>${this.t(this.showHistory ? '当前会话历史 · 原始输入与 AI 回答' : 'AI 回答（生成内容，不是语音原文）')}</strong>
+                ${!this.showHistory && this.responseContexts?.[this.currentResponseIndex] ? html`<div>${this.t('对应输入')}：${this.sourceName(this.responseContexts[this.currentResponseIndex].source)} · ${this.responseContexts[this.currentResponseIndex].question}</div>` : ''}
+            </div>
+            <div
+                class="response-container"
+                id="responseContainer"
+                style=${this.showHistory ? 'display:none' : ''}
+                @scroll=${this.handleAnswerScroll}
+            ></div>
+            ${
+                this.showHistory
+                    ? html`<div class="response-container" id="sessionHistory">
+                          ${
+                              this.responses.length
+                                  ? this.responses.map(
+                                        (answer, index) =>
+                                            html`<article style="padding:12px 0;border-bottom:1px solid var(--border-color)">
+                                                <strong>#${index + 1} · ${this.sourceName(this.responseContexts[index]?.source)}</strong>
+                                                <div style="white-space:pre-wrap">
+                                                    ${this.responseContexts[index]?.question || this.t('旧回答未记录输入来源')}
+                                                </div>
+                                                <strong style="display:block;margin-top:8px;color:#34d399">${this.t('AI 回答')}</strong>
+                                                <div style="white-space:pre-wrap">${answer}</div>
+                                            </article>`
+                                    )
+                                  : this.t('暂无已完成的回答')
+                          }
+                      </div>`
+                    : ''
+            }
             ${
                 hasMultipleResponses
                     ? html`

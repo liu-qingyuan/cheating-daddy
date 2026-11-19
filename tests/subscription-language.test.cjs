@@ -72,3 +72,14 @@ test('automatic pause submits system audio with its source rather than labelling
     assert.equal(calls.languages[0], 'auto');
     api.closeLocalSession();
 });
+test('each AI answer carries the exact originating source and question before the answer event', async () => {
+    const { api, calls } = fixture();
+    await api.initializeLocalSession({}, null, 'interview', '');
+    await api.sendLocalText('我的测试问题');
+    const ctx = calls.events.findIndex(e => e[0] === 'subscription-answer-context'),
+        answer = calls.events.findIndex(e => e[0] === 'new-response');
+    assert.ok(ctx >= 0 && ctx < answer);
+    assert.equal(calls.events[ctx][1].source, 'text');
+    assert.equal(calls.events[ctx][1].question, '我的测试问题');
+    api.closeLocalSession();
+});
