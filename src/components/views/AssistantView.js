@@ -318,6 +318,8 @@ export class AssistantView extends LocalizedElement {
         transcript: { type: String },
         transcripts: { type: Array },
         audioLevels: { type: Object },
+        microphoneCapture: { type: Object },
+        isReconnectingMicrophone: { state: true },
         inputMode: { type: String },
         answerLanguage: { type: String },
         asrLanguage: { type: String },
@@ -336,6 +338,7 @@ export class AssistantView extends LocalizedElement {
         this.transcripts = [];
         this.audioLevels = {};
         this.isSubmittingSpeech = false;
+        this.isReconnectingMicrophone = false;
         this.currentResponseIndex = -1;
         this.selectedProfile = 'interview';
         this.onSendText = () => {};
@@ -728,6 +731,15 @@ export class AssistantView extends LocalizedElement {
         }
     }
 
+    async handleReconnectMicrophone() {
+        this.isReconnectingMicrophone = true;
+        try {
+            await cheatingDaddy.reconnectMicrophone();
+        } finally {
+            this.isReconnectingMicrophone = false;
+        }
+    }
+
     renderSpeechPanel() {
         if (!this.inputMode) return '';
         const labels = {
@@ -752,6 +764,19 @@ export class AssistantView extends LocalizedElement {
                 ${this.t('Answer language')}：${this.t(language)} ·
                 ${this.t('Speech recognition language')}：${this.t(this.asrLanguage === 'auto' ? '自动识别中英文' : this.asrLanguage === 'Chinese' ? '中文' : 'English')}
             </div>
+            ${
+                ['mic_only', 'both'].includes(this.inputMode)
+                    ? html`
+                          <div id="microphoneCaptureStatus" role="status">
+                              ${this.t('实际麦克风')}：${this.microphoneCapture?.deviceLabel || this.t('等待采集')} ·
+                              ${this.t({ starting: '等待音频回调', running: '正在接收音频', stalled: '音频采集中断', error: '采集失败', stopped: '采集已停止' }[this.microphoneCapture?.state] || '等待采集')}
+                          </div>
+                          <button id="reconnectMicrophone" @click=${this.handleReconnectMicrophone} ?disabled=${this.isReconnectingMicrophone}>
+                              ${this.t(this.isReconnectingMicrophone ? '正在重连…' : '重连麦克风')}
+                          </button>
+                      `
+                    : ''
+            }
             ${
                 this.inputMode !== 'files_only'
                     ? html`

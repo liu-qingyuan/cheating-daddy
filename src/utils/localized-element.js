@@ -190,6 +190,26 @@ const chinese = {
     'Paste your resume, job description, or any context for the AI...': '输入简历、题目背景或其他需要 AI 了解的信息…',
 };
 const english = {
+    实际麦克风设备: 'Microphone device',
+    跟随系统默认麦克风: 'System default microphone',
+    '保存的麦克风当前不可用，请重新选择': 'Saved microphone is unavailable; select another',
+    麦克风: 'Microphone',
+    刷新麦克风列表: 'Refresh microphones',
+    '设备在下次开始会话或重连时生效；通话耳机与电脑内置麦克风不是同一个输入。':
+        'Applies next session or on reconnect. Your headset and built-in microphone are different inputs.',
+    实际麦克风: 'Active microphone',
+    等待采集: 'Waiting for capture',
+    等待音频回调: 'Waiting for audio callbacks',
+    正在接收音频: 'Receiving audio',
+    音频采集中断: 'Audio capture stalled',
+    采集失败: 'Capture failed',
+    采集已停止: 'Capture stopped',
+    '正在重连…': 'Reconnecting…',
+    重连麦克风: 'Reconnect microphone',
+    '麦克风已重新连接，请说话测试。': 'Microphone reconnected. Please speak.',
+    '未收到麦克风音频，正在重建采集…': 'No microphone callbacks; rebuilding capture…',
+    '麦克风采集已中断，请点击“重连麦克风”或更换输入设备。': 'Microphone capture stalled. Reconnect or select another input.',
+
     Home: 'Home',
     'AI Customization': 'AI Customization',
     History: 'History',

@@ -7,7 +7,7 @@ const vm = require('node:vm');
 function fixture({ mode = 'mic_only', denyMicrophone = false } = {}) {
     const source = fs.readFileSync(path.join(__dirname, '../src/utils/renderer.js'), 'utf8');
     const start = source.indexOf('async function startCapture(');
-    const end = source.indexOf('\nfunction setupLinuxMicProcessing(', start);
+    const end = source.search(/\n(?:async )?function setupLinuxMicProcessing\(/);
     const calls = { microphone: 0, screen: 0, setup: 0, stopped: 0, status: [] };
     const stream = { getAudioTracks: () => [{ label: 'Controlled microphone fixture' }], getVideoTracks: () => [], getTracks: () => [] };
     const context = {
@@ -37,6 +37,7 @@ function fixture({ mode = 'mic_only', denyMicrophone = false } = {}) {
                 },
             },
         },
+        requestMicrophone: async () => context.navigator.mediaDevices.getUserMedia({ audio: true, video: false }),
         setupLinuxMicProcessing: () => {
             calls.setup++;
         },

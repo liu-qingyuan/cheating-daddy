@@ -188,6 +188,9 @@ export class CustomizeView extends LocalizedElement {
         theme: { type: String },
         asrLanguage: { state: true },
         providerMode: { state: true },
+        microphoneDevices: { state: true },
+        microphoneDeviceId: { state: true },
+        microphoneError: { state: true },
         onProfileChange: { type: Function },
         onLanguageChange: { type: Function },
         onImageQualityChange: { type: Function },
@@ -219,6 +222,9 @@ export class CustomizeView extends LocalizedElement {
         this.audioMode = 'speaker_only';
         this.customPrompt = '';
         this.theme = 'dark';
+        this.microphoneDevices = [];
+        this.microphoneDeviceId = '';
+        this.microphoneError = '';
         this._loadFromStorage();
     }
 
@@ -237,6 +243,8 @@ export class CustomizeView extends LocalizedElement {
             this.theme = prefs.theme ?? 'dark';
             this.asrLanguage = prefs.asrLanguage || 'auto';
             this.providerMode = prefs.providerMode;
+            this.microphoneDeviceId = prefs.microphoneDeviceId || '';
+            void this.refreshMicrophones();
             this.audioMode = prefs.providerMode === 'subscription' ? prefs.subscriptionAudioMode || 'files_only' : prefs.audioMode || 'speaker_only';
             if (keybinds) {
                 this.keybinds = { ...this.getDefaultKeybinds(), ...keybinds };
@@ -492,6 +500,7 @@ export class CustomizeView extends LocalizedElement {
                 uiLanguage: 'zh-CN',
                 asrLanguage: 'auto',
                 subscriptionAudioMode: 'files_only',
+                microphoneDeviceId: '',
                 selectedScreenshotInterval: '5',
                 selectedImageQuality: 'medium',
                 audioMode: 'speaker_only',
@@ -518,6 +527,7 @@ export class CustomizeView extends LocalizedElement {
             this.selectedImageQuality = defaults.selectedImageQuality;
             this.audioMode = this.providerMode === 'subscription' ? defaults.subscriptionAudioMode : defaults.audioMode;
             this.asrLanguage = defaults.asrLanguage;
+            this.microphoneDeviceId = defaults.microphoneDeviceId;
             setInterfaceLanguage(defaults.uiLanguage);
             this.fontSize = defaults.fontSize;
             this.backgroundTransparency = defaults.backgroundTransparency;
@@ -578,6 +588,23 @@ export class CustomizeView extends LocalizedElement {
         }
     }
 
+    async refreshMicrophones() {
+        try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            this.microphoneDevices = devices.filter(
+                device => device.kind === 'audioinput' && !['default', 'communications'].includes(device.deviceId)
+            );
+            this.microphoneError = '';
+        } catch (error) {
+            this.microphoneError = error.message;
+        }
+    }
+
+    async handleMicrophoneSelect(event) {
+        this.microphoneDeviceId = event.target.value;
+        await cheatingDaddy.storage.updatePreference('microphoneDeviceId', this.microphoneDeviceId);
+    }
+
     renderAudioSection() {
         return html`
             <section class="surface">
@@ -593,6 +620,17 @@ export class CustomizeView extends LocalizedElement {
                             <option value="mic_only" .selected=${this.audioMode === 'mic_only'}>${this.t('Microphone Only (Me)')}</option>
                             <option value="both" .selected=${this.audioMode === 'both'}>${this.t('Both Speaker and Microphone')}</option>
                         </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="microphoneDevice">${this.t('实际麦克风设备')}</label>
+                        <select id="microphoneDevice" class="control" @change=${this.handleMicrophoneSelect}>
+                            <option value="" .selected=${!this.microphoneDeviceId}>${this.t('跟随系统默认麦克风')}</option>
+                            ${this.microphoneDeviceId && !this.microphoneDevices.some(device => device.deviceId === this.microphoneDeviceId) ? html`<option value=${this.microphoneDeviceId} selected disabled>${this.t('保存的麦克风当前不可用，请重新选择')}</option>` : ''}
+                            ${this.microphoneDevices.map((device, index) => html`<option value=${device.deviceId} .selected=${device.deviceId === this.microphoneDeviceId}>${device.label || this.t('麦克风') + ' ' + (index + 1)}</option>`)}
+                        </select>
+                        <button class="control" @click=${this.refreshMicrophones}>${this.t('刷新麦克风列表')}</button>
+                        ${this.microphoneError ? html`<div role="alert">${this.microphoneError}</div>` : ''}
+                        <div>${this.t('设备在下次开始会话或重连时生效；通话耳机与电脑内置麦克风不是同一个输入。')}</div>
                     </div>
                     ${
                         this.audioMode !== 'speaker_only'

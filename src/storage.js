@@ -27,6 +27,7 @@ const DEFAULT_PREFERENCES = {
     selectedLanguage: 'cmn-CN',
     uiLanguage: 'zh-CN',
     asrLanguage: 'auto',
+    microphoneDeviceId: '',
     selectedScreenshotInterval: '5',
     selectedImageQuality: 'medium',
     advancedMode: false,

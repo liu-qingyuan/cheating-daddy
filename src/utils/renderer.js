@@ -8,6 +8,9 @@ let audioProcessor = null;
 let micAudioProcessor = null;
 let microphoneStream = null;
 let microphoneAudioContext = null;
+let microphoneAudioSource = null;
+let microphoneCaptureWatchdog = null;
+let microphoneCaptureGeneration = 0;
 let audioBuffer = [];
 const SAMPLE_RATE = 24000;
 const AUDIO_CHUNK_DURATION = 0.1; // seconds
@@ -258,18 +261,9 @@ async function startCapture(screenshotIntervalSeconds = 5, imageQuality = 'mediu
             if (audioMode === 'mic_only' || audioMode === 'both') {
                 let micStream = null;
                 try {
-                    micStream = await navigator.mediaDevices.getUserMedia({
-                        audio: {
-                            sampleRate: SAMPLE_RATE,
-                            channelCount: 1,
-                            echoCancellation: true,
-                            noiseSuppression: true,
-                            autoGainControl: true,
-                        },
-                        video: false,
-                    });
+                    micStream = await requestMicrophone();
                     console.log('macOS microphone capture started');
-                    setupLinuxMicProcessing(micStream);
+                    await setupLinuxMicProcessing(micStream);
                 } catch (micError) {
                     console.warn('Failed to get microphone access on macOS:', micError);
                     if (preferencesCache.providerMode === 'subscription') throw micError;
@@ -316,21 +310,12 @@ async function startCapture(screenshotIntervalSeconds = 5, imageQuality = 'mediu
             if (audioMode === 'mic_only' || audioMode === 'both') {
                 let micStream = null;
                 try {
-                    micStream = await navigator.mediaDevices.getUserMedia({
-                        audio: {
-                            sampleRate: SAMPLE_RATE,
-                            channelCount: 1,
-                            echoCancellation: true,
-                            noiseSuppression: true,
-                            autoGainControl: true,
-                        },
-                        video: false,
-                    });
+                    micStream = await requestMicrophone();
 
                     console.log('Linux microphone capture started');
 
                     // Setup audio processing for microphone on Linux
-                    setupLinuxMicProcessing(micStream);
+                    await setupLinuxMicProcessing(micStream);
                 } catch (micError) {
                     console.warn('Failed to get microphone access on Linux:', micError);
                     // Continue without microphone if permission denied
@@ -363,18 +348,9 @@ async function startCapture(screenshotIntervalSeconds = 5, imageQuality = 'mediu
             if (audioMode === 'mic_only' || audioMode === 'both') {
                 let micStream = null;
                 try {
-                    micStream = await navigator.mediaDevices.getUserMedia({
-                        audio: {
-                            sampleRate: SAMPLE_RATE,
-                            channelCount: 1,
-                            echoCancellation: true,
-                            noiseSuppression: true,
-                            autoGainControl: true,
-                        },
-                        video: false,
-                    });
+                    micStream = await requestMicrophone();
                     console.log('Windows microphone capture started');
-                    setupLinuxMicProcessing(micStream);
+                    await setupLinuxMicProcessing(micStream);
                 } catch (micError) {
                     console.warn('Failed to get microphone access on Windows:', micError);
                 }
@@ -407,39 +383,147 @@ async function startCapture(screenshotIntervalSeconds = 5, imageQuality = 'mediu
     }
 }
 
-function setupLinuxMicProcessing(micStream) {
+async function setupLinuxMicProcessing(micStream) {
     microphoneStream = micStream;
-    // Setup microphone audio processing for Linux
-    const micAudioContext = new AudioContext({ sampleRate: SAMPLE_RATE });
-    microphoneAudioContext = micAudioContext;
-    const micSource = micAudioContext.createMediaStreamSource(micStream);
-    const micProcessor = micAudioContext.createScriptProcessor(BUFFER_SIZE, 1, 1);
-
-    let audioBuffer = [];
-    const samplesPerChunk = SAMPLE_RATE * AUDIO_CHUNK_DURATION;
-
-    micProcessor.onaudioprocess = async e => {
-        const inputData = e.inputBuffer.getChannelData(0);
-        audioBuffer.push(...inputData);
-
-        // Process audio in chunks
-        while (audioBuffer.length >= samplesPerChunk) {
-            const chunk = audioBuffer.splice(0, samplesPerChunk);
-            const pcmData16 = convertFloat32ToInt16(chunk);
-            const base64Data = arrayBufferToBase64(pcmData16.buffer);
-
-            await ipcRenderer.invoke('send-mic-audio-content', {
-                data: base64Data,
-                mimeType: 'audio/pcm;rate=24000',
-            });
+    const generation = ++microphoneCaptureGeneration;
+    const track = micStream.getAudioTracks()[0];
+    const deviceLabel = track?.label || '未知麦克风';
+    const emit = detail => window.dispatchEvent(new CustomEvent('microphone-capture-state', { detail: { deviceLabel, ...detail } }));
+    // Like VOXT's capture-start watchdog: permission is not proof of receiving PCM.
+    for (let attempt = 0; attempt < 2; attempt++) {
+        if (generation !== microphoneCaptureGeneration) throw new Error('麦克风启动已取消。');
+        emit({ state: 'starting', frames: 0, rms: 0 });
+        const context = new AudioContext({ sampleRate: SAMPLE_RATE });
+        microphoneAudioContext = context;
+        const source = context.createMediaStreamSource(micStream);
+        microphoneAudioSource = source;
+        const processor = context.createScriptProcessor(BUFFER_SIZE, 1, 1);
+        micAudioProcessor = processor;
+        let audioBuffer = [];
+        let frames = 0;
+        let lastFrameAt = 0;
+        let lastLevelAt = 0;
+        let resolveFirstFrame;
+        let timer;
+        const ready = new Promise((resolve, reject) => {
+            resolveFirstFrame = resolve;
+            timer = setTimeout(() => reject(new Error('麦克风未产生音频回调，请选择正确的输入设备后重连。')), 2000);
+        });
+        processor.onaudioprocess = e => {
+            if (generation !== microphoneCaptureGeneration) return;
+            const inputData = e.inputBuffer.getChannelData(0);
+            frames++;
+            lastFrameAt = Date.now();
+            if (frames === 1) {
+                clearTimeout(timer);
+                resolveFirstFrame();
+            }
+            // The meter observes raw capture and must not depend on ASR/GPT readiness.
+            if (lastFrameAt - lastLevelAt >= 250) {
+                let energy = 0;
+                for (const sample of inputData) energy += sample * sample;
+                emit({ state: 'running', contextState: context.state, frames, rms: Math.sqrt(energy / (inputData.length || 1)) });
+                lastLevelAt = lastFrameAt;
+            }
+            audioBuffer.push(...inputData);
+            const samplesPerChunk = SAMPLE_RATE * AUDIO_CHUNK_DURATION;
+            while (audioBuffer.length >= samplesPerChunk) {
+                const pcmData16 = convertFloat32ToInt16(audioBuffer.splice(0, samplesPerChunk));
+                void ipcRenderer
+                    .invoke('send-mic-audio-content', {
+                        data: arrayBufferToBase64(pcmData16.buffer),
+                        mimeType: 'audio/pcm;rate=24000',
+                    })
+                    .catch(error => cheatingDaddy.setStatus('麦克风音频发送失败：' + error.message));
+            }
+        };
+        source.connect(processor);
+        processor.connect(context.destination);
+        try {
+            await Promise.all([context.resume(), ready]);
+            if (generation !== microphoneCaptureGeneration) throw new Error('麦克风启动已取消。');
+            clearInterval(microphoneCaptureWatchdog);
+            microphoneCaptureWatchdog = setInterval(() => {
+                if (generation !== microphoneCaptureGeneration) return;
+                if (Date.now() - lastFrameAt > 2500 || track?.readyState === 'ended') {
+                    emit({ state: 'stalled', contextState: context.state, frames, rms: 0 });
+                    cheatingDaddy.setStatus('麦克风采集已中断，请点击“重连麦克风”或更换输入设备。');
+                }
+            }, 1000);
+            return;
+        } catch (error) {
+            clearTimeout(timer);
+            processor.onaudioprocess = null;
+            processor.disconnect();
+            source.disconnect();
+            await context.close().catch(() => {});
+            if (generation !== microphoneCaptureGeneration) throw error;
+            if (attempt === 1) {
+                emit({ state: 'error', error: error.message, rms: 0 });
+                throw error;
+            }
+            cheatingDaddy.setStatus('未收到麦克风音频，正在重建采集…');
         }
-    };
+    }
+}
 
-    micSource.connect(micProcessor);
-    micProcessor.connect(micAudioContext.destination);
+function requestMicrophone() {
+    const deviceId = preferencesCache.microphoneDeviceId;
+    return navigator.mediaDevices.getUserMedia({
+        audio: {
+            ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+            sampleRate: SAMPLE_RATE,
+            channelCount: 1,
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+        },
+        video: false,
+    });
+}
 
-    // Store processor reference for cleanup
-    micAudioProcessor = micProcessor;
+function stopMicrophoneCapture() {
+    microphoneCaptureGeneration++;
+    clearInterval(microphoneCaptureWatchdog);
+    microphoneCaptureWatchdog = null;
+    if (micAudioProcessor) {
+        micAudioProcessor.onaudioprocess = null;
+        micAudioProcessor.disconnect();
+        micAudioProcessor = null;
+    }
+    microphoneAudioSource?.disconnect();
+    microphoneAudioSource = null;
+    microphoneAudioContext?.close().catch(() => {});
+    microphoneAudioContext = null;
+    microphoneStream?.getTracks().forEach(track => track.stop());
+    microphoneStream = null;
+    window.dispatchEvent(new CustomEvent('microphone-capture-state', { detail: { state: 'stopped', rms: 0 } }));
+}
+
+async function reconnectMicrophone() {
+    stopMicrophoneCapture();
+    let generation = microphoneCaptureGeneration;
+    try {
+        await loadPreferencesCache();
+        if (generation !== microphoneCaptureGeneration) return false;
+        const stream = await requestMicrophone();
+        if (generation !== microphoneCaptureGeneration) {
+            stream.getTracks().forEach(track => track.stop());
+            return false;
+        }
+        const startup = setupLinuxMicProcessing(stream);
+        generation = microphoneCaptureGeneration;
+        await startup;
+        if (generation !== microphoneCaptureGeneration) return false;
+        cheatingDaddy.setStatus('麦克风已重新连接，请说话测试。');
+        return true;
+    } catch (error) {
+        // A late request must neither reopen capture nor tear down a newer session.
+        if (generation !== microphoneCaptureGeneration) return false;
+        stopMicrophoneCapture();
+        cheatingDaddy.setStatus('采集失败：' + error.name + ' ' + error.message);
+        return false;
+    }
 }
 
 function setupLinuxSystemAudioProcessing() {
@@ -710,10 +794,7 @@ async function captureManualScreenshot(imageQuality = null) {
 window.captureManualScreenshot = captureManualScreenshot;
 
 function stopCapture() {
-    microphoneStream?.getTracks().forEach(track => track.stop());
-    microphoneStream = null;
-    microphoneAudioContext?.close().catch(() => {});
-    microphoneAudioContext = null;
+    stopMicrophoneCapture();
     if (screenshotInterval) {
         clearInterval(screenshotInterval);
         screenshotInterval = null;
@@ -722,12 +803,6 @@ function stopCapture() {
     if (audioProcessor) {
         audioProcessor.disconnect();
         audioProcessor = null;
-    }
-
-    // Clean up microphone audio processor (Linux only)
-    if (micAudioProcessor) {
-        micAudioProcessor.disconnect();
-        micAudioProcessor = null;
     }
 
     if (audioContext) {
@@ -1130,6 +1205,7 @@ const cheatingDaddy = {
 
     // Status and response functions
     setStatus: text => cheatingDaddyApp.setStatus(text),
+    reconnectMicrophone,
     addNewResponse: response => cheatingDaddyApp.addNewResponse(response),
     updateCurrentResponse: response => cheatingDaddyApp.updateCurrentResponse(response),
 

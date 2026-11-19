@@ -392,6 +392,7 @@ export class CheatingDaddyApp extends LocalizedElement {
         _lastTranscript: { state: true },
         _transcripts: { state: true },
         _audioLevels: { state: true },
+        _microphoneCapture: { state: true },
         _activeInputMode: { state: true },
         _answerLanguage: { state: true },
         _asrLanguage: { state: true },
@@ -414,6 +415,7 @@ export class CheatingDaddyApp extends LocalizedElement {
         this._lastTranscript = '';
         this._transcripts = [];
         this._audioLevels = {};
+        this._microphoneCapture = null;
         this._sessionInitializing = false;
         this.currentResponseIndex = -1;
         this._viewInstances = new Map();
@@ -479,6 +481,11 @@ export class CheatingDaddyApp extends LocalizedElement {
     connectedCallback() {
         super.connectedCallback();
 
+        this._onMicrophoneCapture = event => {
+            this._microphoneCapture = event.detail;
+            if (Number.isFinite(event.detail?.rms)) this._audioLevels = { ...this._audioLevels, mic: event.detail.rms };
+        };
+        window.addEventListener('microphone-capture-state', this._onMicrophoneCapture);
         if (window.require) {
             const { ipcRenderer } = window.require('electron');
             ipcRenderer.on('new-response', (_, response) => this.addNewResponse(response));
@@ -492,7 +499,8 @@ export class CheatingDaddyApp extends LocalizedElement {
                 this._transcripts = [...this._transcripts, item].slice(-20);
             });
             ipcRenderer.on('subscription-audio-level', (_, data) => {
-                if (data && ['mic', 'system'].includes(data.source)) this._audioLevels = { ...this._audioLevels, [data.source]: data.rms };
+                if (data && ['mic', 'system'].includes(data.source) && !(data.source === 'mic' && this._microphoneCapture))
+                    this._audioLevels = { ...this._audioLevels, [data.source]: data.rms };
             });
             ipcRenderer.on('update-response', (_, response) => this.updateCurrentResponse(response));
             ipcRenderer.on('update-status', (_, status) => this.setStatus(status));
@@ -511,6 +519,7 @@ export class CheatingDaddyApp extends LocalizedElement {
 
     disconnectedCallback() {
         super.disconnectedCallback();
+        window.removeEventListener('microphone-capture-state', this._onMicrophoneCapture);
         this._stopTimer();
         if (window.require) {
             const { ipcRenderer } = window.require('electron');
@@ -628,6 +637,7 @@ export class CheatingDaddyApp extends LocalizedElement {
     async handleStart() {
         if (this._sessionInitializing) return;
         const prefs = await cheatingDaddy.storage.getPreferences();
+        this._microphoneCapture = null;
         const providerMode = prefs.providerMode === 'cloud' ? 'byok' : prefs.providerMode || 'byok';
 
         if (providerMode === 'cloud') {
@@ -847,6 +857,7 @@ export class CheatingDaddyApp extends LocalizedElement {
                         .transcript=${this._lastTranscript}
                         .transcripts=${this._transcripts}
                         .audioLevels=${this._audioLevels}
+                        .microphoneCapture=${this._microphoneCapture}
                         .inputMode=${this._activeInputMode}
                         .answerLanguage=${this._answerLanguage}
                         .asrLanguage=${this._asrLanguage}
